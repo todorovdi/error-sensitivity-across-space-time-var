@@ -124,3 +124,54 @@ def subAngles(ang1, ang2):
 
 def assert_len_equal(a1,a2):
     assert len(a1) == len(a2), (len(a1),len(a2))
+
+def get_lmm_pseudo_r_squared(model_results):
+    """
+    Calculates Nakagawa & Schielzeth's R-squared for LMMs.
+    R²m: Marginal R-squared (variance explained by fixed effects)
+    R²c: Conditional R-squared (variance explained by fixed and random effects)
+
+    Args:
+        model_results: A fitted MixedLMResults object from statsmodels.
+
+    Returns:
+        A dictionary with 'R2_marginal' and 'R2_conditional'.
+    """
+    import pandas as pd
+    
+    # Variance of fixed effects component
+    # This is Var(X*beta) where X is the design matrix for fixed effects
+    # and beta are the fixed effects coefficients.
+    var_f = np.var(np.dot(model_results.model.exog, model_results.fe_params))
+
+    # Variance of random effects components
+    # model_results.cov_re gives the variance-covariance matrix of random effects.
+    # We sum the variances (diagonal elements).
+    # If model_results.cov_re is scalar (e.g. for a single random intercept from older statsmodels or simpler cases)
+    if np.isscalar(model_results.cov_re):
+        var_r = model_results.cov_re
+    elif isinstance(model_results.cov_re, (np.ndarray, pd.Series)) and model_results.cov_re.ndim <= 1:
+        # If it's a 1D array (e.g., just variances, no covariances shown directly)
+        # or a scalar that became a 0-dim array
+        var_r = np.sum(model_results.cov_re) # Sum if multiple variance components, or just the value if one
+    else: # It's a 2D matrix (e.g. for random slopes or multiple random effects)
+        var_r = np.sum(np.diag(model_results.cov_re))
+
+
+    # Residual variance (sigma_epsilon^2)
+    # In statsmodels, this is referred to as 'scale'
+    var_e = model_results.scale
+
+    # Total variance
+    var_total = var_f + var_r + var_e
+    
+    if var_total == 0: # Avoid division by zero
+        return {"R2_marginal": 0, "R2_conditional": 0}
+
+    # Marginal R-squared (variance explained by fixed effects)
+    r2_marginal = var_f / var_total
+
+    # Conditional R-squared (variance explained by fixed and random effects)
+    r2_conditional = (var_f + var_r) / var_total
+
+    return {"R2_marginal": r2_marginal, "R2_conditional": r2_conditional}
