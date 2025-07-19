@@ -9,6 +9,7 @@ import matplotlib as mpl
 import seaborn as sns
 import numpy as np
 from pingouin import ttest
+import scipy.stats as stats
 
 from joblib import Parallel, delayed
 from itertools import product
@@ -16,49 +17,70 @@ import statsmodels.api as sm
 import statsmodels.formula.api as smf
 import warnings
 from statsmodels.tools.sm_exceptions import ConvergenceWarning    
+from statsmodels.stats.diagnostic import lilliefors
+from statsmodels.stats.stattools import jarque_bera
 from numpy.linalg import LinAlgError
 import traceback
 import gc
+import pingouin as pg
+import argparse
 
 from bmp_base import get_lmm_pseudo_r_squared
 from bmp_config import path_data, envcode2env
 from bmp_behav_proc import *
 
+all_suffixes = 'mav,std,invstd,mavsq,mav_d_std,mav_d_var,Tan,invmavsq,invmav,std_d_mav,invTan'.split(',')
 
-# run long calc
-n_jobs_inside = 1
-# Number of processes
-#n_jobs = 10  # Use all available CPUs even with one job
-#n_jobs = 5
-#n_jobs = 1
-#n_jobs = 50
-n_jobs = 128
+# Define and parse command line arguments
+parser = argparse.ArgumentParser(description='Run mixed linear models with various parameters')
+parser.add_argument('--n_jobs', type=int, default=128, help='Number of parallel jobs to run')
+parser.add_argument('--n_jobs_inside', type=int, default=1, help='Number of jobs inside each process')
+parser.add_argument('--backend', type=str, default='multiprocessing', choices=['multiprocessing', 'loky'], help='Parallel backend')
+parser.add_argument('--debug', type=int, default=0, help='Run in debug mode with fewer iterations')
+parser.add_argument('--N', type=int, default=25, help='Transition point from step 1 to step 3')
+parser.add_argument('--min_range', type=int, default=3, help='Minimum range value')
+parser.add_argument('--max_range', type=int, default=40, help='Maximum range value')
+# one can give space separated params
+parser.add_argument('--cocols', nargs='+', default=[ 'env', 'ps2_'], help='Columns to use as covariates')
+#'None',
+parser.add_argument('--varn0s', nargs='+', default=['error_pscadj', 'error_pscadj_abs'], help='Variable name prefixes')
+parser.add_argument('--varn_suffixes', nargs='+', default=all_suffixes, help='Variable name suffixes')
+parser.add_argument('--save', type=str, default='results', help='Directory to save results')
 
-backend = 'multiprocessing' # 'loky'
-#backend = 'loky' 
+args = parser.parse_args()
 
+# Set parameters from command line arguments
+n_jobs_inside = args.n_jobs_inside
+n_jobs = args.n_jobs
+backend = args.backend
+debug = args.debug
+N = args.N
+cocols = args.cocols
+# Set variable names
+varn0s = args.varn0s
+varn_suffixes = args.varn_suffixes
+
+# Create output directory
 prl_path_data = pjoin(path_data, '../NIH_behav_intermed_data', 'mixedlm_prl')
+os.makedirs(prl_path_data, exist_ok=True)
 
 ####################
 
-N = 25; debug = False  # moment of transition from step 1 to step 3
-# Create args array using product
-cocols = ['None', 'env', 'ps2_']
-#cocols = [ 'env'] #, 'ps2_']
-#std_mavsz_range = range(2, 30)
-std_mavsz_range = list(range(3,N)) + list( range(N, 40, 3) )
-#std_mavsz_range = range(2, 20)
-#std_mavsz_range = range(2, 12)
-#std_mavsz_range = range(2, 3)
-varn0s = ['error_pscadj', 'error_pscadj_abs']
-varn_suffixes = 'all_suffixes'
-#varn_suffixes = ['std', 'invstd', 'mavsq', 'mav_d_std', 'mav_d_var', 'Tan']
+# Define range based on N value
+std_mavsz_range = list(range(args.min_range, min(N, args.max_range)) )
+if N > args.max_range:
+    std_mavsz_range += list(range(N, args.max_range, 3))
 
-# N = 40; debug = True
-# std_mavsz_range = [3,5]
+if debug:
+    std_mavsz_range = [3, 5]  # Shorter range for debugging
+    n_jobs = 1  # Use single job for debugging
+    n_jobs_inside = 1  # Use single job inside for debugging
+    
+    std_mavsz_range = [4]
+    cocols = ['env']
+    errn0s = ['error_pscadj_abs']
+    varn_suffixes = ['mavsq']
 
-# shorter
-cocols = [ 'env', 'ps2_']
 #varn0s = ['error'] #, 'error_pscadj', 'error_pscadj_abs']
 #varn_suffixes = ['std', 'invstd', 'Tan']
 #N_ = 10
@@ -71,8 +93,6 @@ cocols = [ 'env', 'ps2_']
 # #cocols = [ 'env', 'ps2_']
 # #cocols = [ 'ps2_']
 # cocols = [ 'env']
-
-
 
 ####################
 
@@ -95,11 +115,10 @@ else:
     dfcs,dfcs_fixhistlen,dfcs_fixhistlen_untrunc,histlens  = addWindowStatCols(dfc, ES_thr, 
                                         varn0s = ['error','error_pscadj','error_pscadj_abs'])
     dfcs_fixhistlen, me_pct_excl = truncLargeStats(dfcs_fixhistlen_untrunc, histlens, 5.)
-import pingouin as pg
+
 dfcs_fixhistlen['environment'] = dfcs_fixhistlen['environment'].astype(int)
 df_ = dfcs_fixhistlen[['environment','subject','trials','error_pscadj_abs_Tan29']]
 assert not df_.duplicated(['subject','trials']).any()
-all_suffixes = 'mav,std,invstd,mavsq,mav_d_std,mav_d_var,Tan,invmavsq,invmav,std_d_mav,invTan'.split(',')
 
 # make sure length n  is inside
 varn0 = 'error_pscadj'
@@ -114,8 +133,16 @@ print('all_suffixes = ', all_suffixes )
 
 ####################################
 prl = []
-if varn_suffixes == 'all_suffixes':
+if varn_suffixes[0] == 'all_suffixes':
     varn_suffixes = all_suffixes
+#elif ',' in varn_suffixes:
+#    varn_suffixes = varn_suffixes.split(',')
+#else:
+#    varn_suffixes = [varn_suffixes]
+assert set(varn_suffixes).issubset(set(all_suffixes)), \
+    f'varn_suffixes {varn_suffixes} not in all_suffixes {all_suffixes}'
+
+print(varn_suffixes, 'varn_suffixes')
 
 # Define the function to be executed in parallel
 def run_model(args, ret_res = False, inc_prev = True):
@@ -133,6 +160,8 @@ def run_model(args, ret_res = False, inc_prev = True):
     df_ = df_[~np.isinf(df_['err_sens'])]
     df_ = df_[~np.isinf(-df_['err_sens'])]
 
+    assert len(df_) > 0, f'No data for {varn} and {cocoln}'
+
     excfmt = None
     nstarts = 1
     result = None
@@ -140,9 +169,16 @@ def run_model(args, ret_res = False, inc_prev = True):
         s,s2 = f"err_sens ~ {varn}","1"
         model = smf.mixedlm(s, df_, 
                     groups=df_["subject"])
-        with warnings.catch_warnings():
+        with warnings.catch_warnings(record=True) as w:
             warnings.filterwarnings('ignore',category=ConvergenceWarning)
             result = model.fit()
+            wmess = []
+            for warning in w:
+                wmess += [warning.message]
+            result.converged2 = result.converged and \
+                ( not (result.params.isna().any() | result.pvalues.isna().any()) )
+            #print(f'Converged2: {result.converged2} for {s} and {s2}')
+            result.wmess = wmess
         results = {(s,s2): result}
     else:
         flas = []
@@ -155,7 +191,6 @@ def run_model(args, ret_res = False, inc_prev = True):
         
         s,s2 = f"err_sens ~ C({cocoln}) + {varn}",f"~C({cocoln})"; flas += [(s,s2)]
         s,s2 = f"err_sens ~ C({cocoln}) + {varn}","1"; flas += [(s,s2)]        
-        
      
         results = {}
         for s,s2 in flas:
@@ -171,18 +206,29 @@ def run_model(args, ret_res = False, inc_prev = True):
                         wmess += [warning.message]
                     result.converged2 = result.converged and \
                         ( not (result.params.isna().any() | result.pvalues.isna().any()) )
+                    #print(f'Converged2: {result.converged2} for {s} and {s2}')
                     result.wmess = wmess
 
+            #except (LinAlgError,ValueError) as le:
             except LinAlgError as le:
                 excfmt = traceback.format_exc()
                 result = None
+            except ValueError as le:
+                print(f'ValueError: {le} for {s} and {s2}')
+                raise le
             results[(s,s2)] = result
+
+    #print(len(results), 'models computed for', varn, cocoln, std_mavsz_)
         
     s2summary = {}
     for stpl,result in results.items():        
         if (result is not None) and result.converged:
             #result.remove_data()
+            #from pprint import pprint
+
             summary = result.summary()
+            if debug:
+                print('result',summary)
             summary.tables[0].loc[5,2] = 'Converged2:'
             summary.tables[0].loc[5,3] = 'Yes' if result.converged2 else 'No'
             summary.wmess = result.wmess
@@ -192,6 +238,32 @@ def run_model(args, ret_res = False, inc_prev = True):
             #summary.cov_params = result.cov_params()
             r = get_lmm_pseudo_r_squared(result)
             summary.pseudo_r2 = r
+
+            #print(f'Pseudo R2 for {stpl} = {r}')
+            try:
+                summary.resid = result.resid
+                ks_stat, p_value = lilliefors(result.resid, dist='norm')
+                jb_stat, jb_p_value, skew, kurtosis = jarque_bera(result.resid)
+                summary.lilliefors_test_st = ks_stat
+                summary.lilliefors_test_pv = p_value
+                summary.jarque_bera_test_st = jb_stat
+                summary.jarque_bera_test_pv = jb_p_value
+                summary.jarque_bera_test_skew = skew
+                summary.jarque_bera_test_kurtosis = kurtosis
+                
+                summary.fitted_values = result.fittedvalues
+            except (ValueError,LinAlgError) as le:
+                print(f'resid exception: {le} for {stpl}')
+                summary.resid = None
+                summary.fitted_values = None
+                summary.lilliefors_test_st = np.nan
+                summary.lilliefors_test_pv = np.nan
+                summary.jarque_bera_test_st = np.nan
+                summary.jarque_bera_test_pv = np.nan
+                summary.jarque_bera_test_skew = np.nan
+                summary.jarque_bera_test_kurtosis = np.nan
+                #raise le
+
         else:
             summary = None
         s2summary[stpl] = summary
@@ -242,13 +314,11 @@ else:
     # to save the last
     s_ = str(datetime.now())[:-7].replace(' ','_')
     if not debug:
-        fnf = pjoin(prl_path_data, f'prl_{ind+1}_{s_}'
-        print('saved to ', fnf))
+        fnf = pjoin(prl_path_data, f'prl_{ind+1}_{s_}.npz')
+        print('saved to ', fnf)
         np.savez( fnf, prl )
 
 if debug:
     print('!!!!!!!!!!!!! it was TTTTTTTTTTTTESTST')  # TEST
 
 print(len(args))
-
-
