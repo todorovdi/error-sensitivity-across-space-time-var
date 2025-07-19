@@ -175,3 +175,165 @@ def get_lmm_pseudo_r_squared(model_results):
     r2_conditional = (var_f + var_r) / var_total
 
     return {"R2_marginal": r2_marginal, "R2_conditional": r2_conditional}
+
+# Define the function to be executed in parallel
+def run_linear_mixed_model(args, ret_res = False, inc_prev = True, n_jobs_inside = 1,
+                           all_formulas = True, target_var = 'err_sens'):
+    '''
+    ret_res: if True, return the results of all models (but it does not work well for multiprocessing)
+    '''
+    import warnings
+    from statsmodels.tools.sm_exceptions import ConvergenceWarning    
+    from statsmodels.stats.diagnostic import lilliefors
+    from statsmodels.stats.stattools import jarque_bera
+    import traceback
+    import statsmodels.api as sm
+    import statsmodels.formula.api as smf
+    from numpy.linalg import LinAlgError
+
+    dfcs_fixhistlen, cocoln, std_mavsz_, varn0, varn_suffix, transform = args
+    varn = f'{varn0}_{varn_suffix}{std_mavsz_}'
+    subset = [varn, target_var]
+    if inc_prev:
+        subset += ['prev_error_pscadj_abs']
+    df_ = dfcs_fixhistlen.dropna(subset=subset)
+    df_ = df_[~np.isinf(df_[varn])]
+    df_ = df_[~np.isinf(-df_[varn])]
+    df_ = df_[~np.isinf(df_[target_var])]
+    df_ = df_[~np.isinf(-df_[target_var])]
+
+    varn_eff = varn
+    if transform == 'log':
+        print(f'Using log transform for {varn}')
+        if np.any(df_[varn] <= 0):
+            print(f'Warning: {varn} has non-positive values, using log_abs transformation')
+            varn_eff = f'log_abs_{varn}'
+            df_[varn_eff] = np.log(1e-8 + df_[varn].abs())
+        else:
+            varn_eff = f'log_{varn}'
+            df_[varn_eff] = np.log(df_[varn])
+    elif transform == 'BoxCox':
+        varn_eff = f'BoxCox_{varn}'
+        from scipy import stats
+        df_[f'BoxCox_{varn}'], best_lambda_BoxCox = stats.boxcox(0.1 -df_[varn].min() + df_[varn])
+    print(varn_eff)
+
+    assert len(df_) > 0, f'No data for {varn} and {cocoln}'
+
+    excfmt = None
+    nstarts = 1
+    result = None
+    if cocoln == 'None':
+        s,s2 = f"err_sens ~ {varn_eff}","1"
+        model = smf.mixedlm(s, df_, groups=df_["subject"])
+        with warnings.catch_warnings(record=True) as w:
+            warnings.filterwarnings('ignore',category=ConvergenceWarning)
+            result = model.fit()
+            wmess = []
+            for warning in w:
+                wmess += [warning.message]
+            result.converged2 = result.converged and \
+                ( not (result.params.isna().any() | result.pvalues.isna().any()) )
+            #print(f'Converged2: {result.converged2} for {s} and {s2}')
+            result.wmess = wmess
+        results = {(s,s2): result}
+    else:
+        flas = []
+        if all_formulas:
+            s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff} + C({cocoln}) * {varn_eff} + {varn_eff} * prev_error_pscadj_abs",\
+                f"~C({cocoln})"; flas += [(s,s2)]
+            s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff} + C({cocoln}) * {varn_eff} + {varn_eff} * prev_error_pscadj_abs",\
+                f"1"; flas += [(s,s2)]
+            s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff} + C({cocoln}) * {varn_eff}", f"~C({cocoln})"; flas += [(s,s2)]
+            s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff} + C({cocoln}) * {varn_eff}","1";  flas += [(s,s2)]
+
+            s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff}",f"~C({cocoln})"; flas += [(s,s2)]
+        s,s2 = f"{target_var} ~ C({cocoln}) + {varn_eff}","1"; flas += [(s,s2)]
+
+        results = {}
+        for s,s2 in flas:
+            try:                
+                model = smf.mixedlm(s, df_.copy(), 
+                            groups=df_["subject"], re_formula=s2)
+                with warnings.catch_warnings(record=True) as w:
+                    ###warnings.filterwarnings('ignore',category=ConvergenceWarning)     
+                    # n_jobs argument does not really work :(
+                    result = model.fit(n_jobs =n_jobs_inside)
+                    wmess = []
+                    for warning in w:
+                        wmess += [warning.message]
+                    result.converged2 = result.converged and \
+                        ( not (result.params.isna().any() | result.pvalues.isna().any()) )
+                    #print(f'Converged2: {result.converged2} for {s} and {s2}')
+                    result.wmess = wmess
+
+            #except (LinAlgError,ValueError) as le:
+            except LinAlgError as le:
+                excfmt = traceback.format_exc()
+                result = None
+            except ValueError as le:
+                print(f'ValueError: {le} for {s} and {s2}')
+                raise le
+            results[(s,s2)] = result
+
+    #print(len(results), 'models computed for', varn, cocoln, std_mavsz_)
+        
+    s2summary = {}
+    for stpl,result in results.items():        
+        if (result is not None) and result.converged:
+            #result.remove_data()
+            #from pprint import pprint
+
+            summary = result.summary()
+            # if debug:
+            #     print('result',summary)
+            summary.tables[0].loc[5,2] = 'Converged2:'
+            summary.tables[0].loc[5,3] = 'Yes' if result.converged2 else 'No'
+            summary.wmess = result.wmess
+            summary.params = result.params
+            summary.pvalues = result.pvalues
+            #summary.cov_re = result.cov_re
+            #summary.cov_params = result.cov_params()
+            r = get_lmm_pseudo_r_squared(result)
+            summary.pseudo_r2 = r
+
+            #print(f'Pseudo R2 for {stpl} = {r}')
+            try:
+                summary.resid = result.resid
+                ks_stat, p_value = lilliefors(result.resid, dist='norm')
+                jb_stat, jb_p_value, skew, kurtosis = jarque_bera(result.resid)
+                summary.lilliefors_test_st = ks_stat
+                summary.lilliefors_test_pv = p_value  # small p-values mean NOT normally distributed
+                summary.jarque_bera_test_st = jb_stat
+                summary.jarque_bera_test_pv = jb_p_value  # small p-values mean NOT normally distributed
+                summary.jarque_bera_test_skew = skew
+                summary.jarque_bera_test_kurtosis = kurtosis
+                
+                summary.fitted_values = result.fittedvalues
+            except (ValueError,LinAlgError) as le:
+                print(f'resid exception: {le} for {stpl}')
+                summary.resid = None
+                summary.fitted_values = None
+                summary.lilliefors_test_st = np.nan
+                summary.lilliefors_test_pv = np.nan
+                summary.jarque_bera_test_st = np.nan
+                summary.jarque_bera_test_pv = np.nan
+                summary.jarque_bera_test_skew = np.nan
+                summary.jarque_bera_test_kurtosis = np.nan
+                #raise le
+
+        else:
+            summary = None
+        s2summary[stpl] = summary
+    print(args[1:])
+    r = {'cocoln': cocoln, 'histlen': std_mavsz_,
+            'varn': varn_eff, 'varn0':varn0, 'varn_suffix':varn_suffix,             
+             'excfmt':excfmt, 'transform': transform,
+            's2summary': s2summary, 'retention_factor':df_.iloc[0]['retention_factor_s']}
+    if transform == 'BoxCox':
+        r['best_lambda_BoxCox'] = best_lambda_BoxCox
+            #'res': result}
+            #'nstarts':nstarts,
+    if ret_res:
+        r['s2res'] = results
+    return r

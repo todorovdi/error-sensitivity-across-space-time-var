@@ -1,4 +1,3 @@
-# %%
 import os
 from os.path import join as pjoin
 from datetime import datetime
@@ -13,19 +12,12 @@ import scipy.stats as stats
 
 from joblib import Parallel, delayed
 from itertools import product
-import statsmodels.api as sm
-import statsmodels.formula.api as smf
-import warnings
-from statsmodels.tools.sm_exceptions import ConvergenceWarning    
-from statsmodels.stats.diagnostic import lilliefors
-from statsmodels.stats.stattools import jarque_bera
-from numpy.linalg import LinAlgError
 import traceback
 import gc
 import pingouin as pg
 import argparse
 
-from bmp_base import get_lmm_pseudo_r_squared
+from bmp_base import get_lmm_pseudo_r_squared, run_linear_mixed_model 
 from bmp_config import path_data, envcode2env
 from bmp_behav_proc import *
 
@@ -40,6 +32,7 @@ parser.add_argument('--debug', type=int, default=0, help='Run in debug mode with
 parser.add_argument('--N', type=int, default=25, help='Transition point from step 1 to step 3')
 parser.add_argument('--min_range', type=int, default=3, help='Minimum range value')
 parser.add_argument('--max_range', type=int, default=40, help='Maximum range value')
+parser.add_argument('--transforms', nargs='+', default=['id','log'], help='transforms to apply to the data')
 # one can give space separated params
 parser.add_argument('--cocols', nargs='+', default=[ 'env', 'ps2_'], help='Columns to use as covariates')
 #'None',
@@ -59,6 +52,7 @@ cocols = args.cocols
 # Set variable names
 varn0s = args.varn0s
 varn_suffixes = args.varn_suffixes
+transforms = args.transforms
 
 # Create output directory
 prl_path_data = pjoin(path_data, '../NIH_behav_intermed_data', 'mixedlm_prl')
@@ -144,141 +138,8 @@ assert set(varn_suffixes).issubset(set(all_suffixes)), \
 
 print(varn_suffixes, 'varn_suffixes')
 
-# Define the function to be executed in parallel
-def run_model(args, ret_res = False, inc_prev = True):
-    '''
-    ret_res: if True, return the results of all models (but it does not work well for multiprocessing)
-    '''
-    dfcs_fixhistlen, cocoln, std_mavsz_, varn0, varn_suffix = args
-    varn = f'{varn0}_{varn_suffix}{std_mavsz_}'
-    subset = [varn, 'err_sens']
-    if inc_prev:
-        subset += ['prev_error_pscadj_abs']
-    df_ = dfcs_fixhistlen.dropna(subset=subset)
-    df_ = df_[~np.isinf(df_[varn])]
-    df_ = df_[~np.isinf(-df_[varn])]
-    df_ = df_[~np.isinf(df_['err_sens'])]
-    df_ = df_[~np.isinf(-df_['err_sens'])]
 
-    assert len(df_) > 0, f'No data for {varn} and {cocoln}'
-
-    excfmt = None
-    nstarts = 1
-    result = None
-    if cocoln == 'None':
-        s,s2 = f"err_sens ~ {varn}","1"
-        model = smf.mixedlm(s, df_, 
-                    groups=df_["subject"])
-        with warnings.catch_warnings(record=True) as w:
-            warnings.filterwarnings('ignore',category=ConvergenceWarning)
-            result = model.fit()
-            wmess = []
-            for warning in w:
-                wmess += [warning.message]
-            result.converged2 = result.converged and \
-                ( not (result.params.isna().any() | result.pvalues.isna().any()) )
-            #print(f'Converged2: {result.converged2} for {s} and {s2}')
-            result.wmess = wmess
-        results = {(s,s2): result}
-    else:
-        flas = []
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn} + C({cocoln}) * {varn} + {varn} * prev_error_pscadj_abs",\
-            f"~C({cocoln})"; flas += [(s,s2)]
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn} + C({cocoln}) * {varn} + {varn} * prev_error_pscadj_abs",\
-            f"1"; flas += [(s,s2)]
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn} + C({cocoln}) * {varn}", f"~C({cocoln})"; flas += [(s,s2)]
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn} + C({cocoln}) * {varn}","1";  flas += [(s,s2)]
-        
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn}",f"~C({cocoln})"; flas += [(s,s2)]
-        s,s2 = f"err_sens ~ C({cocoln}) + {varn}","1"; flas += [(s,s2)]        
-     
-        results = {}
-        for s,s2 in flas:
-            try:                
-                model = smf.mixedlm(s, df_.copy(), 
-                            groups=df_["subject"], re_formula=s2)
-                with warnings.catch_warnings(record=True) as w:
-                    ###warnings.filterwarnings('ignore',category=ConvergenceWarning)     
-                    # n_jobs argument does not really work :(
-                    result = model.fit(n_jobs =n_jobs_inside)
-                    wmess = []
-                    for warning in w:
-                        wmess += [warning.message]
-                    result.converged2 = result.converged and \
-                        ( not (result.params.isna().any() | result.pvalues.isna().any()) )
-                    #print(f'Converged2: {result.converged2} for {s} and {s2}')
-                    result.wmess = wmess
-
-            #except (LinAlgError,ValueError) as le:
-            except LinAlgError as le:
-                excfmt = traceback.format_exc()
-                result = None
-            except ValueError as le:
-                print(f'ValueError: {le} for {s} and {s2}')
-                raise le
-            results[(s,s2)] = result
-
-    #print(len(results), 'models computed for', varn, cocoln, std_mavsz_)
-        
-    s2summary = {}
-    for stpl,result in results.items():        
-        if (result is not None) and result.converged:
-            #result.remove_data()
-            #from pprint import pprint
-
-            summary = result.summary()
-            if debug:
-                print('result',summary)
-            summary.tables[0].loc[5,2] = 'Converged2:'
-            summary.tables[0].loc[5,3] = 'Yes' if result.converged2 else 'No'
-            summary.wmess = result.wmess
-            summary.params = result.params
-            summary.pvalues = result.pvalues
-            #summary.cov_re = result.cov_re
-            #summary.cov_params = result.cov_params()
-            r = get_lmm_pseudo_r_squared(result)
-            summary.pseudo_r2 = r
-
-            #print(f'Pseudo R2 for {stpl} = {r}')
-            try:
-                summary.resid = result.resid
-                ks_stat, p_value = lilliefors(result.resid, dist='norm')
-                jb_stat, jb_p_value, skew, kurtosis = jarque_bera(result.resid)
-                summary.lilliefors_test_st = ks_stat
-                summary.lilliefors_test_pv = p_value
-                summary.jarque_bera_test_st = jb_stat
-                summary.jarque_bera_test_pv = jb_p_value
-                summary.jarque_bera_test_skew = skew
-                summary.jarque_bera_test_kurtosis = kurtosis
-                
-                summary.fitted_values = result.fittedvalues
-            except (ValueError,LinAlgError) as le:
-                print(f'resid exception: {le} for {stpl}')
-                summary.resid = None
-                summary.fitted_values = None
-                summary.lilliefors_test_st = np.nan
-                summary.lilliefors_test_pv = np.nan
-                summary.jarque_bera_test_st = np.nan
-                summary.jarque_bera_test_pv = np.nan
-                summary.jarque_bera_test_skew = np.nan
-                summary.jarque_bera_test_kurtosis = np.nan
-                #raise le
-
-        else:
-            summary = None
-        s2summary[stpl] = summary
-    print(args[1:])
-    r = {'cocoln': cocoln, 'histlen': std_mavsz_,
-            'varn': varn, 'varn0':varn0, 'varn_suffix':varn_suffix,             
-             'excfmt':excfmt,
-            's2summary': s2summary, 'retention_factor':df_.iloc[0]['retention_factor_s']}
-            #'res': result}
-            #'nstarts':nstarts,
-    if ret_res:
-        r['s2res'] = results
-    return r
-
-args = list(product(cocols, std_mavsz_range, varn0s, varn_suffixes))
+args = list(product(cocols, std_mavsz_range, varn0s, varn_suffixes,transforms))
 print('Len args = ',len(args))
 
 ind = 0
@@ -294,13 +155,13 @@ if n_jobs != 1:
     n_jobs_eff = min(len(args), min(n_jobs, num_processors) )
     print(f"Starting {n_jobs_eff} parallel jobs")
     prl = Parallel(n_jobs=n_jobs_eff, backend = backend)\
-        (delayed(run_model)( (dfcs_fixhistlen,*arg) ) for arg in args)
+        (delayed(run_linear_mixed_model)( (dfcs_fixhistlen,*arg), n_jobs_inside=n_jobs_inside ) for arg in args)
     if not debug:
         s_ = str(datetime.now())[:-7].replace(' ','_')
         np.savez( pjoin(prl_path_data, f'prl_alltogether_{s_}'), prl )
 else:
     for arg in args:
-        prl += [run_model((dfcs_fixhistlen,*arg))]
+        prl += [run_linear_mixed_model((dfcs_fixhistlen,*arg), n_jobs_inside=n_jobs_inside)]
 #     for arg in args[69:69+1]:
 #         prl += [run_model((dfcs_fixhistlen,*arg),ret_res=True)]
         

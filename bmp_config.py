@@ -1,12 +1,12 @@
 import os
 import multiprocessing
 import numpy as np
-import socket
 from os.path import join as pjoin
 import argparse
 import configparser
 import io as StringIO
 import pprint
+
 
 os.environ['OPENBLAS_NUM_THREADS'] = '1'
 #os.environ['OMP_NUM_THREADS']='1'
@@ -169,3 +169,4 @@ class FormatPrinter(pprint.PrettyPrinter):
         if type(obj) in self.formats:
             return self.formats[type(obj)] % obj, 1, 0
         return pprint.PrettyPrinter.format(self, obj, ctx, maxlvl, lvl)
+
