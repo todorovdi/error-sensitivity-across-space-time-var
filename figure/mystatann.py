@@ -184,7 +184,11 @@ def plotSig(ax,x1,x2,y,ticklen=2,txt=None,hor=False, df=None, coln=None, colpair
     if hor:
         ax.text(y,meanloc,txt)
     else:
-        ax.text(meanloc,y,txt, ha='center', fontsize = fontsize)
+        if txt == 'ns':
+            # ns should be a bit above the line
+            ax.text(meanloc,y*1.03,txt, ha='center', fontsize = fontsize)
+        else:
+            ax.text(meanloc,y,txt, ha='center', fontsize = fontsize)
     return ttrssig
 
 def _decorString(x):
@@ -192,10 +196,62 @@ def _decorString(x):
         x = '"' + x + '"'
     return x
 
-def plotSigAll(ax, yst, yinc, ticklen=2,txt=None,
-               hor=False, df=None, coln=None, colpair=None, paired=True,
-           pooled=False, alt='two-sided', verbose=0, pairs = None, meanloc_voffset = 0,
-               graded_signif = True, fontsize = None, multi_comp_corr_method = 'none'):
+def plotSigAll(ax, yst, yinc, ticklen=2, txt=None, hor=False, df=None, coln=None, colpair=None, paired=True,
+            pooled=False, alt='two-sided', verbose=0, pairs=None, meanloc_voffset=0,
+            graded_signif=True, fontsize=None, multi_comp_corr_method='none'):
+    """
+    Plot significance indicators for multiple comparisons between pairs of data groups.
+    Parameters
+    ----------
+    ax : matplotlib.axes.Axes
+        The axes on which to plot the significance indicators.
+    yst : float
+        Starting y-coordinate for the significance indicators (from bottom).
+    yinc : float
+        Increment in y-coordinate for each subsequent significance indicator.
+    ticklen : int, optional
+        Length of the tick marks. Default is 2.
+    txt : str, optional
+        Text to display with the significance indicator. Default is None.
+    hor : bool, optional
+        If True, plot horizontal indicators. Default is False.
+    df : pandas.DataFrame, optional
+        DataFrame containing the data to analyze.
+    coln : str, optional
+        Name of the column in df containing the values to compare.
+    colpair : str, optional
+        Name of the column in df containing the group identifiers.
+    paired : bool, optional
+        If True, use paired statistical tests. Default is True.
+    pooled : bool, optional
+        If True, use pooled variance. Default is False.
+    alt : str, optional
+        Alternative hypothesis type ('two-sided', 'less', 'greater'). Default is 'two-sided'.
+    verbose : int, optional
+        Verbosity level. Default is 0.
+    pairs : list of tuples, optional
+        Specific pairs to compare. If None, all possible pairs will be compared.
+    meanloc_voffset : float, optional
+        Vertical offset for mean location indicators. Default is 0.
+    graded_signif : bool, optional
+        If True, display graded significance levels. Default is True.
+    fontsize : float or None, optional
+        Font size for significance text. If None, use default size.
+    multi_comp_corr_method : str, optional
+        Method for multiple comparison correction ('none', 'bonf', 'holm', etc.). Default is 'none'.
+    Returns
+    -------
+    tuple
+        A tuple containing:
+        - ycur (float): The final y-coordinate after plotting all indicators
+        - ttrssig (pandas.DataFrame): DataFrame containing the statistical test results
+    Notes
+    -----
+    This function uses comparePairs to perform statistical tests between pairs of groups
+    and plotSig to visualize the significance levels. It automatically handles
+    formatting of group names and organizing the statistical comparisons.
+    """
+
     '''yst is y starting from bottom'''
     ycur = yst
 

@@ -62,7 +62,7 @@ os.makedirs(prl_path_data, exist_ok=True)
 
 # Define range based on N value
 std_mavsz_range = list(range(args.min_range, min(N, args.max_range)) )
-if N > args.max_range:
+if N < args.max_range:
     std_mavsz_range += list(range(N, args.max_range, 3))
 
 if debug:

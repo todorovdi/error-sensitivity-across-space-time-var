@@ -337,3 +337,50 @@ def run_linear_mixed_model(args, ret_res = False, inc_prev = True, n_jobs_inside
     if ret_res:
         r['s2res'] = results
     return r
+
+def find_continuous_streaks(numbers):
+    #numbers = sorted([int(n) for n in numbers_str])
+
+    if numbers is None:
+        return []
+
+    streaks = []
+    current_streak_start = numbers[0]
+    current_streak_end = numbers[0]
+
+    for i in range(1, len(numbers)):
+        if numbers[i] == current_streak_end + 1:
+            current_streak_end = numbers[i]
+        else:
+            if current_streak_start == current_streak_end:
+                streaks.append(str(current_streak_start))
+            else:
+                streaks.append(f"{current_streak_start}-{current_streak_end}")
+            current_streak_start = numbers[i]
+            current_streak_end = numbers[i]
+
+    # Add the last streak
+    if current_streak_start == current_streak_end:
+        streaks.append(str(current_streak_start))
+    else:
+        streaks.append(f"{current_streak_start}-{current_streak_end}")
+
+    return streaks
+
+
+# def eboost(X,y):
+# from interpret.glassbox import ExplainableBoostingRegressor
+# from interpret import show
+# from sklearn.model_selection import cross_val_score, train_test_split
+# ebm = ExplainableBoostingRegressor(feature_names=feature_names, random_state=42)
+
+# cv_scores = cross_val_score(ebm, X_train, y_train, cv=5, scoring='r2')
+# print(f"Cross-validation R2 scores: {cv_scores}")
+# print(f"Mean CV R2 score: {np.mean(cv_scores):.4f}")
+
+# from interpret.glassbox import ExplainableBoostingRegressor
+# from interpret import show
+#     ebm.fit(X_train, y_train)
+
+#     global_explanation = ebm.explain_global(name='EBM Global Explanation')
+#     show(global_explanation)

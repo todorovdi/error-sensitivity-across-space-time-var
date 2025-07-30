@@ -1782,6 +1782,7 @@ def comparePairs(df_, varn, col,
     '''
     assert isinstance(paired, bool)
     assert len(df_), 'Given empty dataset'
+    assert varn is not None, 'varn cannot be None'
     ttrs = []
     if int(pooled) == 1:
         ttrs = comparePairs_(df_,varn,col, pooled=True, 
@@ -1829,6 +1830,7 @@ def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','le
     '''
     from bmp_behav_proc import myttest
     assert len(df_)
+    assert varn is not None, 'varn cannot be None'
 
     ttrs = []
 
@@ -1844,7 +1846,11 @@ def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','le
         else:
             s1 = ['subject',  varn]
             s2 = ['subject' ]
-        df_ = df_[s1].groupby(s2,observed=True).mean(numeric_only=1).reset_index()
+        try:
+            df_ = df_[s1].groupby(s2,observed=True).mean(numeric_only=1).reset_index()
+        except KeyError as e:
+            print(f'KeyError: {e} for {s1} and {s2}')
+            raise ValueError(f'Bad columns {s1} or {s2} in df_')
 
     #print(df_.groupby()
 
