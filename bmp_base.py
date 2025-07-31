@@ -368,6 +368,28 @@ def find_continuous_streaks(numbers):
     return streaks
 
 
+def calc_EBM(df_, std_mavsz_, varn0, varn_suffix, n_folds=5, n_jobs=-1):
+    from interpret.glassbox import ExplainableBoostingRegressor
+    from sklearn.model_selection import cross_val_score, train_test_split
+    varn = f'{varn0}_{varn_suffix}{std_mavsz_}'
+    df_ = df_[~np.isnan(df_[varn])] #NaN
+    df_ = df_[~np.isinf(df_[varn])]
+    df_ = df_[~np.isinf(df_['err_sens'])]
+    
+    #dfcs_fixhistlen, cocoln, std_mavsz_, varn0, varn_suffix = args
+
+    X_train = df_[varn].values.reshape(-1, 1) 
+    y_train = df_['err_sens'].values#.reshape(-1, 1) 
+    print('shapes are ', X_train.shape, y_train.shape)
+    ebm = ExplainableBoostingRegressor(feature_names=[varn], random_state=42)
+    cv_scores = cross_val_score(ebm, X_train, y_train, cv=n_folds, scoring='r2', n_jobs=n_jobs)
+    #print(f"Cross-validation R2 scores: {cv_scores}")
+    r2 = np.mean(cv_scores)
+    print(f"{varn} mean CV R2 score: {r2:.4f}")
+
+    ebm.fit(X_train, y_train)
+    return ebm, cv_scores, r2
+
 # def eboost(X,y):
 # from interpret.glassbox import ExplainableBoostingRegressor
 # from interpret import show

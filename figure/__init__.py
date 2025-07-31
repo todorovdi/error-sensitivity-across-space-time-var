@@ -6,7 +6,11 @@ def renameTickLabels(ax, d, hor=False, rotation=0):
     else:
         old = ax.get_xticklabels()
 
-    new = [ d[tl.get_text()] for tl in old ]
+    try:
+        new = [ d[tl.get_text()] for tl in old ]
+    except KeyError as e:
+        print(d.keys())
+        raise e
 
     if hor:
         ax.set_yticklabels(new, rotation=rotation)
