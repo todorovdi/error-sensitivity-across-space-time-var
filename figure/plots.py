@@ -378,3 +378,126 @@ def Fig2_annotate_segments(ax, df, qs, category_col='ps2_', rotation_angle=45,
         cat, start, end = seg
         if i > 0:
             ax.axvline(x=start, linestyle='--', color='black', alpha=0.3)
+
+
+def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
+    # --- Font Sizes ---
+    fontsize_axislabel = 14
+    fontsize_legend = 13
+    fontsize_suptitle = 18
+
+    # V2 (from gemini)
+    import matplotlib.pyplot as plt
+    import seaborn as sns
+    from figure import env2color
+    # from figure.imgfilemanip import * # No longer needed
+
+    # --- Configuration ---
+    coln = 'error_pscadj_abs_Tan20'
+    #coln = 'error_pscadj_Tan20'
+    plot_kind = 'hist'  # 'kde' or 'hist'
+    ylim_scatter = (dfcs_fixhistlen['err_sens'].min()*1.05, dfcs_fixhistlen['err_sens'].max()*1.05)
+    ylim_kde = (-5, 5)
+    annot_loc = (0.05, 0.95)
+    text_shift = (-5, 0)
+    environments = ['stable', 'random']
+    subplot_labels = ['A', 'B', 'C', 'D']
+    #kde_cmaps = dict(zip(environments, ['Greys', 'Oranges']))  # Shades of gray and orange for the environments
+    #kde_cmaps = dict(zip(environments, ['Greys', 'Oranges']))  # Shades of gray and orange for the environments
+    kde_cmaps = env2color
+    coln2et = dict(zip(['error_pscadj_abs_Tan20', 'error_pscadj_Tan20'], ['absolute error', 'signed error']))
+    if coln2xlim is None:
+        coln2xlim = dict(zip(['error_pscadj_abs_Tan20', 'error_pscadj_Tan20'], [(-0.2, 9.5), (-0.2, 10.5)]))
+
+    # Assuming palette_stabrand is a dictionary like {'stable': 'blue', 'random': 'orange'}
+    # If it's a list, you might need to map it to the environments.
+
+    # --- Create a Unified Figure and a 2x2 Grid of Axes ---
+    # sharex=True ensures the x-axes (Tan statistic) are aligned vertically.
+    # sharey='row' ensures the y-axes (Error Sensitivity) are aligned horizontally for each row.
+    # figsize is adjusted to accommodate two columns and a legend.
+    fig, axes = plt.subplots(
+        nrows=2, ncols=2, figsize=(11, 8), sharex=True, sharey='row'
+    )
+
+    # --- Top Row: Scatter Plots (A, B) ---
+    for envi, env in enumerate(environments):
+        ax = axes[0, envi]
+        data_subset = dfcs_fixhistlen[dfcs_fixhistlen['env'] == env]
+        
+        sns.scatterplot(
+            data=data_subset,
+            x=coln,
+            y='err_sens',
+            color=env2color[env], # Use the palette color for the environment
+            ax=ax
+        )
+        ax.set_ylim(ylim_scatter)
+        ax.set_ylabel("Error Sensitivity", fontsize=fontsize_axislabel)
+
+    # --- Bottom Row: Density Plots (C, D) ---
+    for envi, env in enumerate(environments):
+        ax = axes[1, envi]
+        data_subset = dfcs_fixhistlen[dfcs_fixhistlen['env'] == env]
+        custom_cmap = sns.light_palette(env2color[env], as_cmap=True)
+
+        if plot_kind == 'kde':
+            sns.kdeplot(
+                data=data_subset, x=coln, y='err_sens',
+                fill=True, thresh=0.05, levels=10,
+                cmap=custom_cmap, # Using a single colormap as hue is not used
+                ax=ax)
+        elif plot_kind == 'hist':
+            sns.histplot(
+                data=data_subset, x=coln, y='err_sens',
+                bins = (40,55),
+                cmap=custom_cmap, # Using a single colormap as hue is not used
+                ax=ax)
+
+        ax.set_ylim(ylim_kde)
+        ax.set_ylabel("Error Sensitivity", fontsize=fontsize_axislabel)
+        ax.set_xlabel("Tan statistic", fontsize=fontsize_axislabel)
+
+    # --- Common Formatting for All Subplots ---
+    for envi, ax in enumerate(axes.flatten()):
+        # Set shared properties
+        ax.axhline(0, color='k', linestyle='--', linewidth=1)
+        ax.set_xlim(coln2xlim[coln])
+        ax.set_title("") # Remove individual panel titles
+        
+        # Add labels (A, B, C, D)
+        ax.annotate(
+            subplot_labels[envi], 
+            xy=annot_loc, 
+            xytext=text_shift,
+            fontsize=19, 
+            fontweight='bold', 
+            va='top', 
+            ha='left',
+            xycoords='axes fraction', 
+            textcoords='offset points'
+        )
+
+    # --- Create a single, shared Legend ---
+    # Recreate legend handles from your palette for a clean look
+    from matplotlib.patches import Patch
+    legend_elements = [
+        Patch(facecolor=env2color['stable'], label='Stable'),
+        Patch(facecolor=env2color['random'], label='Random')
+    ]
+    fig.legend(handles=legend_elements, title='Environment', bbox_to_anchor=(0.95, 0.85), fontsize=fontsize_legend, title_fontsize=fontsize_legend)
+
+    fig.suptitle(
+        f"Relation between error sensitivity and windowed error statistics ({coln2et[coln]})", 
+    #    y=1.02, 
+        fontsize=fontsize_suptitle
+    )
+
+    # --- Adjust Layout and Save ---
+    # plt.tight_layout() adjusts subplot params for a tight layout.
+    # The rect argument prevents the suptitle from overlapping with subplots.
+    plt.tight_layout()#rect=[0, 0.05, 1, 0.97])
+
+    fign_out = f'FigS6_unified_{coln}'
+    plt.savefig(pjoin(path_fig, 'behav', fign_out + '.svg'))
+    plt.savefig(pjoin(path_fig, 'behav', fign_out + '.pdf'))
