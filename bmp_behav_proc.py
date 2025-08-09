@@ -2041,7 +2041,7 @@ def formatRecentStatVarnames(isec, histlen_str=' (histlen='):
             .replace('_mav_d_std',' mean/std' + histlen_str)\
             .replace('_std_d_mav',' std/mean' + histlen_str)\
             .replace('_std',' std' + histlen_str)\
-            .replace('_mav_d_var',' mean/std' + histlen_str) 
+            .replace('_mav_d_var',' mean/var' + histlen_str) 
         if len(histlen_str):
             s2 += ')' 
         isec_nice.append(s2 )
