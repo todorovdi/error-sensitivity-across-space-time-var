@@ -134,3 +134,11 @@ def svg2png(fnfout, dpi=None, inpdpi=72):
     # Display the PNG file
     #tree.write(output_file)
     return fnfout_png
+
+def svg2pdf(fnfout): #, dpi=None, inpdpi=72):
+    assert '.svg' in fnfout
+    import cairosvg
+    fnfout_pdf = fnfout.replace('.svg','.pdf')
+    cairosvg.svg2pdf(url=fnfout, write_to=fnfout_pdf)#, dpi=dpi)
+    print(f'Saved to {fnfout_pdf}')
+    return fnfout_pdf
