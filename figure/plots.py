@@ -380,11 +380,16 @@ def Fig2_annotate_segments(ax, df, qs, category_col='ps2_', rotation_angle=45,
             ax.axvline(x=start, linestyle='--', color='black', alpha=0.3)
 
 
-def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
+def plot_ES_vs_Tan(df, coln, subjects_set = 'all', hist_bins =  (40,55), coln2xlim=None,
+                   legend_loc=(0.95, 0.85)):
     # --- Font Sizes ---
-    fontsize_axislabel = 14
+    fontsize_axislabel = 16
     fontsize_legend = 13
     fontsize_suptitle = 18
+    fontsize_ticks = 13
+
+    if subjects_set == 'one':
+        df = df[df['subject_ind'] == 1]
 
     # V2 (from gemini)
     import matplotlib.pyplot as plt
@@ -393,10 +398,8 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
     # from figure.imgfilemanip import * # No longer needed
 
     # --- Configuration ---
-    coln = 'error_pscadj_abs_Tan20'
-    #coln = 'error_pscadj_Tan20'
     plot_kind = 'hist'  # 'kde' or 'hist'
-    ylim_scatter = (dfcs_fixhistlen['err_sens'].min()*1.05, dfcs_fixhistlen['err_sens'].max()*1.05)
+    ylim_scatter = (df['err_sens'].min()*1.05, df['err_sens'].max()*1.05)
     ylim_kde = (-5, 5)
     annot_loc = (0.05, 0.95)
     text_shift = (-5, 0)
@@ -407,7 +410,9 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
     kde_cmaps = env2color
     coln2et = dict(zip(['error_pscadj_abs_Tan20', 'error_pscadj_Tan20'], ['absolute error', 'signed error']))
     if coln2xlim is None:
-        coln2xlim = dict(zip(['error_pscadj_abs_Tan20', 'error_pscadj_Tan20'], [(-0.2, 9.5), (-0.2, 10.5)]))
+        coln2xlim = dict(zip(['error_pscadj_abs_Tan20', 'error_pscadj_Tan20'], 
+                             [ {'stable': (-0.2, 9.5),'random': (-0.2, 9.5)}, 
+                              {'stable': (-0.2, 10.5), 'random': (-0.2, 10.5)}]))
 
     # Assuming palette_stabrand is a dictionary like {'stable': 'blue', 'random': 'orange'}
     # If it's a list, you might need to map it to the environments.
@@ -417,13 +422,13 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
     # sharey='row' ensures the y-axes (Error Sensitivity) are aligned horizontally for each row.
     # figsize is adjusted to accommodate two columns and a legend.
     fig, axes = plt.subplots(
-        nrows=2, ncols=2, figsize=(11, 8), sharex=True, sharey='row'
+        nrows=2, ncols=2, figsize=(11, 8), sharex=False, sharey='row'
     )
 
     # --- Top Row: Scatter Plots (A, B) ---
     for envi, env in enumerate(environments):
         ax = axes[0, envi]
-        data_subset = dfcs_fixhistlen[dfcs_fixhistlen['env'] == env]
+        data_subset = df[df['env'] == env]
         
         sns.scatterplot(
             data=data_subset,
@@ -433,12 +438,13 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
             ax=ax
         )
         ax.set_ylim(ylim_scatter)
+        ax.set_xlabel("")
         ax.set_ylabel("Error Sensitivity", fontsize=fontsize_axislabel)
 
     # --- Bottom Row: Density Plots (C, D) ---
     for envi, env in enumerate(environments):
         ax = axes[1, envi]
-        data_subset = dfcs_fixhistlen[dfcs_fixhistlen['env'] == env]
+        data_subset = df[df['env'] == env]
         custom_cmap = sns.light_palette(env2color[env], as_cmap=True)
 
         if plot_kind == 'kde':
@@ -450,7 +456,7 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
         elif plot_kind == 'hist':
             sns.histplot(
                 data=data_subset, x=coln, y='err_sens',
-                bins = (40,55),
+                bins=hist_bins,
                 cmap=custom_cmap, # Using a single colormap as hue is not used
                 ax=ax)
 
@@ -459,15 +465,19 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
         ax.set_xlabel("Tan statistic", fontsize=fontsize_axislabel)
 
     # --- Common Formatting for All Subplots ---
-    for envi, ax in enumerate(axes.flatten()):
+    for axi, ax in enumerate(axes.flatten()):
+        env = environments[axi % len(environments)]
         # Set shared properties
         ax.axhline(0, color='k', linestyle='--', linewidth=1)
-        ax.set_xlim(coln2xlim[coln])
+        print(axi,coln,env)
+        print(coln2xlim[coln])
+        ax.set_xlim(coln2xlim[coln][env])
         ax.set_title("") # Remove individual panel titles
+        ax.tick_params(axis='both', which='major', labelsize=fontsize_ticks)
         
         # Add labels (A, B, C, D)
         ax.annotate(
-            subplot_labels[envi], 
+            subplot_labels[axi], 
             xy=annot_loc, 
             xytext=text_shift,
             fontsize=19, 
@@ -485,10 +495,15 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
         Patch(facecolor=env2color['stable'], label='Stable'),
         Patch(facecolor=env2color['random'], label='Random')
     ]
-    fig.legend(handles=legend_elements, title='Environment', bbox_to_anchor=(0.95, 0.85), fontsize=fontsize_legend, title_fontsize=fontsize_legend)
+    fig.legend(handles=legend_elements, title='Environment', bbox_to_anchor=legend_loc, 
+               fontsize=fontsize_legend, title_fontsize=fontsize_legend)
 
-    fig.suptitle(
-        f"Relation between error sensitivity and windowed error statistics ({coln2et[coln]})", 
+    fig_ttl = f"Relation between error sensitivity and windowed error statistics\nof {coln2et[coln]}, " 
+    if subjects_set == 'one':
+        fig_ttl += f"for trials from one participant"
+    else:
+        fig_ttl += f"for trials from all participants"
+    fig.suptitle(fig_ttl,
     #    y=1.02, 
         fontsize=fontsize_suptitle
     )
@@ -498,6 +513,6 @@ def plot_ES_vs_Tan(dfcs_fixhistlen, coln, coln2xlim=None):
     # The rect argument prevents the suptitle from overlapping with subplots.
     plt.tight_layout()#rect=[0, 0.05, 1, 0.97])
 
-    fign_out = f'FigS6_unified_{coln}'
+    fign_out = f'FigS6_unified_{coln}_subj{subjects_set}'
     plt.savefig(pjoin(path_fig, 'behav', fign_out + '.svg'))
     plt.savefig(pjoin(path_fig, 'behav', fign_out + '.pdf'))
