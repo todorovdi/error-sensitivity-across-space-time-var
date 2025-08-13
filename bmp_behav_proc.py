@@ -1679,12 +1679,16 @@ def myttest(df_, qs1, qs2, varn, alt = ['two-sided','greater','less'], paired=Fa
         print(f'myttest: Exception {e} for {qs2}')
         raise ValueError(f'bad qs {qs2}')
 
-    assert ( (len(df1) > 0) and (len(df2) > 0) )
+    assert  (len(df1) > 0),  (qs1,len(df1)) 
+    assert  (len(df2) > 0),  (qs2,len(df2)) 
 
     if len(cols_checkdup):
         assert not df1.duplicated(cols_checkdup).any()
         assert not df2.duplicated(cols_checkdup).any()
     for alt_ in alt:
+        #print('myttest subject ' ,list(zip(df2.subject.values, df1.subject.values)))
+        assert list(df1.subject.values) == list(df2.subject.values)
+
         ttr = ttest(df1[varn].values, 
                     df2[varn].values, alternative=alt_, paired=paired)
         ttrs += [ttr]
@@ -1715,7 +1719,7 @@ def multi_comp_corr(ttrs, method='bonf'):
             ttrs.loc[dfc.index,'mc_corr_N'] = len(pvs)
     return ttrs
 
-def compare0(df, varn, alt=['greater','less'], cols_addstat = []):
+def compare0(df, varn, alt=['greater','less'], cols_addstat = ['err_sens']):
     from pingouin import ttest
     '''
         returns ttrs (not only sig)
@@ -1755,6 +1759,25 @@ def decorateTtestRest(ttrs):
 
     ttrs['ttstr']  = ttrs.apply(f,axis=1)
 
+def report_ttest(row, varn='err_sens'):
+    ''' row as computed by pingouin t-test'''
+    s = ''
+    CI = row['CI95%']
+    if isinstance(CI, str):
+        CI = CI.replace(' ',', ')
+        CIstr = f"{CI}"
+    else:
+        CIstr = f"[{CI[0]:.2f}, {CI[1]:.2f}]"
+    if f'{varn}_mean' in row:
+        s += f"{row[f'{varn}_mean']:.2f}" 
+        if f'{varn}_std' in row:
+            s += f" ± {row[f'{varn}_std']:.2f},"
+        else:
+            s += ', '
+    s += f" 95% CI {CIstr}, " +\
+        f" t({row['dof']})={row['T']:.2f}, p={row['pval']:.2e}, d={row['cohen-d']:.2f}"
+    return s
+
 def pval2starcode(pval):
     c = None
     if pval > 0.05:
@@ -1771,7 +1794,9 @@ def pval2starcode(pval):
 
 def comparePairs(df_, varn, col, 
                  alt = ['two-sided','greater','less'], paired=False,
-                 pooled = 2, updiag = True, qspairs = None, multi_comp_corr_method = 'bonf') -> (pd.DataFrame,pd.DataFrame):
+                 pooled = 2, updiag = True, 
+                 qspairs = None, multi_comp_corr_method = 'bonf',
+                 cols_addstat=['err_sens'] ) -> (pd.DataFrame,pd.DataFrame):
     '''
     returns sig,all
     runs t-tests on all pairs of queries defined in qspairs
@@ -1784,13 +1809,16 @@ def comparePairs(df_, varn, col,
     assert len(df_), 'Given empty dataset'
     assert varn is not None, 'varn cannot be None'
     ttrs = []
+
     if int(pooled) == 1:
         ttrs = comparePairs_(df_,varn,col, pooled=True, 
-                             alt=alt, paired=paired, qspairs = qspairs)
+                             alt=alt, paired=paired, qspairs = qspairs,
+                             cols_addstat =cols_addstat)
         ttrs += [ttrs]
     if (int(pooled) == 0) or (pooled == 2):
         ttrs_np = comparePairs_(df_,varn,col, pooled=False, 
-            alt=alt, paired=paired, updiag = updiag, qspairs = qspairs)
+            alt=alt, paired=paired, updiag = updiag, qspairs = qspairs,
+            cols_addstat=cols_addstat)
         ttrs += [ttrs_np]
     ttrs = pd.concat(ttrs, ignore_index=1)
      
@@ -1823,7 +1851,9 @@ def addStarcodes(ttrs):
     ttrs.loc[ ttrs['pval'] <= 0.0001, 'starcode'] = '****'
     return ttrs
 
-def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','less'], paired=False, updiag = True, qspairs = None):
+def comparePairs_(df_, varn, col, pooled=True , 
+    alt=  ['two-sided','greater','less'], paired=False, 
+    updiag = True, qspairs = None, cols_addstat=['err_sens']):
     '''
     all upper diag pairs of col values
     runs t-tests on all pairs of queries defined in qspairs
@@ -1851,6 +1881,7 @@ def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','le
         except KeyError as e:
             print(f'KeyError: {e} for {s1} and {s2}')
             raise ValueError(f'Bad columns {s1} or {s2} in df_')
+    df_ = df_.sort_values(['subject'])
 
     #print(df_.groupby()
 
@@ -1879,6 +1910,8 @@ def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','le
                 ttrs_ = myttest(df_,qs1, qs2, varn, alt=alt, paired=paired)
                 ttrs_['val1'] = cv
                 ttrs_['val2'] = cv2
+                for coln_as in cols_addstat:
+                    ttrs_[coln_as + '_mean'] = df_.query(qs1)[varn].mean() - df_.query(qs2)[varn].mean()
                 ttrs += [ttrs_]
     else:
         for qs1,qs2 in qspairs:
@@ -1887,6 +1920,8 @@ def comparePairs_(df_, varn, col, pooled=True , alt=  ['two-sided','greater','le
             ttrs_['val2'] = qs2
             ttrs_['val1_parsed'] = qs1.split('=')[1].strip()
             ttrs_['val2_parsed'] = qs2.split('=')[1].strip()
+            for coln_as in cols_addstat:
+                ttrs_[coln_as + '_mean'] = df_.query(qs1)[varn].mean() - df_.query(qs2)[varn].mean()
             ttrs += [ttrs_]
 
     ttrs = pd.concat(ttrs, ignore_index=1)
