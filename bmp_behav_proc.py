@@ -1775,7 +1775,7 @@ def report_ttest(row, varn='err_sens'):
         else:
             s += ', '
     s += f" 95% CI {CIstr}, " +\
-        f" t({row['dof']})={row['T']:.2f}, p={row['pval']:.2e}, d={row['cohen-d']:.2f}"
+        f"t({row['dof']})={row['T']:.2f}, p={row['pval']:.2e}, d={row['cohen-d']:.2f}"
     return s
 
 def pval2starcode(pval):
@@ -2041,8 +2041,8 @@ def corrMean(dfallst, coltocorr = 'trialwpertstage_wb',
     groupcols0 = []
     if 'thr' in dfallst.columns:
         groupcols0 = ['thr'] 
-    groupcols = groupcols0 + [stagecol]
-    groupcols2 = groupcols0 + ['subject', stagecol]
+    groupcols = groupcols0 + [stagecol] # to compute corrs with pooling
+    groupcols2 = groupcols0 + ['subject', stagecol] # to compute corr within subj and then mean
 
     # separate subjects
     corrs_per_subj_me0 = dfallst.groupby(groupcols2, observed=True).apply(f)
