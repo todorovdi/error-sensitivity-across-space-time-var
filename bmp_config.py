@@ -12,7 +12,8 @@ os.environ['OPENBLAS_NUM_THREADS'] = '1'
 #os.environ['OMP_NUM_THREADS']='1'
 
 # these env variables have to be set 
-path_data      = os.environ["DATA_MEMORY_ERRORS_STAB_AND_STOCH"]
+path_data_stabrand      = os.environ["DATA_MEMORY_ERRORS_STAB_AND_STOCH"]
+path_data_passive       = os.environ["DATA_MEMORY_ERRORS_PASSIVE"]
 path_fig       = os.environ["FIG_MEMORY_ERRORS_STAB_AND_STOCH"]
 #path_code      = os.environ["$CODE_MEMORY_ERRORS"]
 
@@ -72,11 +73,14 @@ envcode2env = dict( zip( b,a ) )
 ####################
 
 # they are same
-if os.path.exists(path_data):
-    subjects = [f for f in os.listdir(path_data) if f.startswith('sub') ]
+if os.path.exists(path_data_stabrand):
+    subjects = [f for f in os.listdir(path_data_stabrand) if f.startswith('sub') ]
     subjects = list(sorted(subjects))
+
+    subjects_passive = [f for f in os.listdir(pjoin(path_data_passive)) if f.startswith('sub') and not f.startswith('subjects')]  
+    subjects_passive = list(sorted(subjects_passive))
 else:
-    print(f'data dir {path_data} does not exist, setting default subjects')
+    print(f'data dir {path_data_stabrand} does not exist, setting default subjects')
     subjects = subjects_predef
 
 if os.path.expandvars('$USER') == 'demitau':

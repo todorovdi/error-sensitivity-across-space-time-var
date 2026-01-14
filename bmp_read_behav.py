@@ -7,7 +7,7 @@ import argparse
 
 from bmp_base import subAngles,width,height
 from bmp_base import calc_rad_angle_from_coordinates, radius, radius_cursor, radius_target
-from bmp_config import stage2evn2event_ids,envcode2env,path_data, trigger2phase
+from bmp_config import stage2evn2event_ids,envcode2env, trigger2phase
 from bmp_behav_proc import aggRows, checkErrBounds
 
 parser = argparse.ArgumentParser()
@@ -16,6 +16,9 @@ parser.add_argument('--n_jobs',  default = 20, type=int )
 parser.add_argument('--save_suffix',  default='', type=str )
 parser.add_argument('--use_sub_angles',  default=0, type=int )
 parser.add_argument('--perturbation_random_recalc',  default=1, type=int )
+parser.add_argument('--data_subkind',  default='stabrand', type=str, required=True )
+parser.add_argument('--task',  default='visuomotor', type=str, required=False )
+parser.add_argument('--session_id',  default=1, type=int, required=False )
 args = parser.parse_args()
 if args.save_suffix in ["''",'""']:
     args.save_suffix = '' 
@@ -25,13 +28,25 @@ subject = args.subject
 n_jobs = args.n_jobs
 use_sub_angles = args.use_sub_angles
 
+assert args.task in ['visuomotor','passive','locaerror']
+
+if args.data_subkind == 'stabrand':
+    from bmp_config import path_data_stabrand as path_data
+elif args.data_subkind == 'passive':
+    from bmp_config import path_data_passive as path_data
+
 print('----------------' + subject + '-----------------------')
-folder = pjoin(path_data, subject, 'behavdata')
+if args.data_subkind == 'stabrand':
+    folder = pjoin(path_data, subject, 'behavdata')
+elif args.data_subkind == 'passive':
+    folder = pjoin(path_data, subject, f'session{args.session_id}', 'behavdata')
+
 files = os.listdir(folder)
 fname_behavior = list()
-task = 'visuomotor'
+task = args.task
 fname_behavior.extend([pjoin(folder, f) for f in files if ((task in f) and
                                                              ('.log' in f))])
+assert len(fname_behavior)
 
 ts = [(time.time(), 'start')]
 def logtime(s):
@@ -43,11 +58,25 @@ def logtime(s):
 print(fname_behavior)
 fnf = fname_behavior[0]
 # time is time since start
-logcols = ('trials,trigger,target_inds,perturbation,joyX,joyY,'
-    'feedbackX_screen,feedbackY_screen,'
-    'org_feedbackX_screen,org_feedbackY_screen,'
-    'error_distance,environment,time').split(',')
+if args.data_subkind == 'stabrand':
+    logcols = ('trials,trigger,target_inds,perturbation,joyX,joyY,'
+        'feedbackX_screen,feedbackY_screen,'
+        'org_feedbackX_screen,org_feedbackY_screen,'
+        'error_distance,environment,time').split(',')
+elif args.data_subkind == 'passive':
+    if args.task == 'visuomotor':
+        logcols = ('trials,trigger,target_inds,perturbation,joyX,joyY,'
+            'feedbackX_screen,feedbackY_screen,'
+            'org_feedbackX_screen,org_feedbackY_screen,'
+            'error_distance,time').split(',')
+    else: 
+        raise NotImplementedError('only visuomotor task is implemented for passive data')
 df = pd.read_csv(fnf, names=logcols)
+
+if args.data_subkind == 'passive' and args.task == 'visuomotor':
+    df['environment'] = 0 # only stable env in passive visuomotor task
+    df['session_id'] = args.session_id
+
 # check that time is increasing
 assert (df['time'].diff().iloc[1:] > 0).all()
 df['subject'] = subject
@@ -73,6 +102,7 @@ df['phase'] = df['trigger'].apply(lambda x: trigger2phase[x])
 d = {'TARGET_PHASE':'target', 'FEEDBACK_PHASE':'feedback'}
 df['env'] = df['environment'].apply(lambda x: envcode2env[x])
 
+df['target_inds'] = df['target_inds'].astype(int)
 df['target_locs'] = df['target_inds'].apply(lambda x: target_angs[x])
 logtime('small operations')
 
@@ -139,7 +169,7 @@ df['reltime_start_tgt_phase'] = r['reltime_start_tgt_phase']
 
 logtime('RT')
 
-fname = pjoin(path_data, subject, 'behavdata',
+fname = pjoin(folder,
                 f'behav_{task}_df_upd_perframe{args.save_suffix}.pkl.zip')
 print(fname)
 df.to_pickle(fname, compression='zip')
@@ -351,10 +381,14 @@ logtime('dfcc2')
 
 #######################
 
-task = 'VisuoMotor'
 
-fname = pjoin(path_data, subject, 'behavdata',
-                f'behav_{task}_df_upd{args.save_suffix}.pkl')
+if args.task == 'visuomotor':
+    task2 = 'VisuoMotor'
+else:
+    task2 = 'LocalError'
+
+fname = pjoin(folder,
+                f'behav_{task2}_df_upd{args.save_suffix}.pkl')
 print(fname)
 dfcc1.to_pickle(fname)
 
@@ -365,8 +399,8 @@ print(subject, badcols)
 
 logtime('save dfcc1')
 
-fname = pjoin(path_data, subject, 'behavdata',
-                f'behav_{task}_df_upd_seppausetrials{args.save_suffix}.pkl')
+fname = pjoin(folder,
+                f'behav_{task2}_df_upd_seppausetrials{args.save_suffix}.pkl')
 print(fname)
 dfcc2.to_pickle(fname)
 

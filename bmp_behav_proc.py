@@ -90,7 +90,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     pertvals     = df_all['perturbation'].unique()
     if len(pertvals) > 10:
         print(f'WARNING: too many pertvals! len={len(pertvals)}')
-        if dset == 'Romain_Exp2_Cohen':
+        if dset in ['Romain_Exp2_Cohen','Romain_Exp1_Cohen']:
             # maybe we extended perturbations to nonzero vals in random. Then we only take stable
             pertvals_eff = df_all.query('environment == 0')['perturbation'].unique() 
     else:
@@ -99,7 +99,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     subj = subjects[0]
 
     # by default perturbation in NIH data is == 0 for random, which is confusing
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen','Romain_Exp1_Cohen']:
         correctPertCol_NIH(df_all)
 
     if fn_events_full is not None:
@@ -153,9 +153,8 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
         df_all[f'dist_rad_from_tgt-{dt}'] = df_all[f'dist_rad_from_tgt-{dt}'].apply(lbd)
 
 
-    if dset == 'Romain_Exp2_Cohen':
-        df_all['subject_ind'] = df_all['subject'].str[3:5].astype(int)
-
+    df_all['subject_ind'] = df_all['subject'].str[3:5].astype(int)
+    if dset in ['Romain_Exp2_Cohen']:
         test_triali = pert_seq_code_test_trial
         subj2pert_seq_code = {}
         for subj in subjects:
@@ -174,8 +173,31 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
 
         df_all['pert_seq_code'] = df_all.apply(f,1)
 
+    elif dset in ['Romain_Exp1_Cohen']:
+        test_triali = pert_seq_code_test_trial
+        subj2pert_seq_code = {}
+        for subj in subjects:
+            for session_id in [1,2]:
+                mask = (df_all['subject'] == subj) & (df_all['session_id'] == session_id)
+                dfc = df_all[mask]
+                r = dfc.loc[dfc[trial_col0] == test_triali,'perturbation']
+                if len(r) == 0:
+                    continue
+                assert len(r) == 1, len(r)
+                if r.values[0] > 5.:
+                    pert_seq_code = 0
+                else:
+                    pert_seq_code = 1
+                subj2pert_seq_code[subj,session_id] = pert_seq_code
+
+            def f(row):
+                return subj2pert_seq_code[row['subject'],row['session_id']]
+
+        df_all['pert_seq_code'] = df_all.apply(f,1)
+
         #########################   index within block (second block same numbers)
 
+    if dset == 'Romain_Exp2_Cohen':
         if not (skip_existing and ('block_name' not in df_all.columns) ):
             def f(row):
                 env = envcode2env[ row['environment']]
@@ -194,7 +216,10 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
                 return block_name
             df_all['block_name'] = df_all.apply(f,1)
         assert 'block_name' in df_all.columns
+    elif dset == 'Romain_Exp1_Cohen':
+        df_all['block_name'] = 'stable1'
 
+    #if dset == 'Romain_Exp1_Cohen':
 
     from collections import OrderedDict
     dfc = df_all[df_all['subject'] == subj]
@@ -207,13 +232,14 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     #df_all['trialwe'] = None  # within respective env (inc both blocks)
     # important to do it for a fixed subject
     df_all['trialwb'] = -1
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
         df_all['trialwe'] = -1
 
     mask = df_all['subject'] == subj
     dfc = df_all[mask]
 
-    assert np.min( np.diff( dfc[trial_col0] ) ) > 0
+    mi = np.min( np.diff( dfc[trial_col0] ) )
+    assert  mi > 0, (mi, dfc.loc[dfc[trial_col0] == mi])
 
     trials_starts = {}
     for bn in block_names:
@@ -223,7 +249,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     
     mts = np.max( list(trials_starts.values() ) )
     print('Max of indices of trials starting a block = ',mts)
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
         assert mts <= 767, mts
 
     def f(row):
@@ -240,7 +266,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     ########################   index within env (second block -- diff numbers)
 
     # within single subject
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
         envchanges  = dfc.loc[dfc['environment'].diff() != 0,trial_col0].values
         envchanges = list(envchanges) + [len(dfc)]
 
@@ -278,7 +304,11 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
         ##########################   index within pertrubation (within block)
 
         bn2trial_st = {}  # block name 2 trial start
-        for bn in ['stable1', 'stable2']:
+        if dset in ['Romain_Exp2_Cohen']:
+            bns = ['stable1', 'stable2']
+        else:
+            bns = ['stable1']
+        for bn in bns:
             dfc_oneb = dfc[dfc['block_name'] == bn]
             df_starts = dfc_oneb.loc[dfc_oneb['perturbation'].diff() != 0]
             trial_st = df_starts[trial_col0].values
@@ -287,7 +317,8 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
             trial_st = list(trial_st) +  [last + 1]
 
             bn2trial_st[bn] = trial_st
-            assert len(trial_st) == 6, len(trial_st) # - 1
+            if dset in ['Romain_Exp2_Cohen']:
+                assert len(trial_st) == 6, (len(trial_st),trial_st) # - 1
 
         #bn2trial_st = df_all.groupby('block_name')[trial_col0].min().to_dict()
         print(bn2trial_st)
@@ -396,7 +427,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
 
     ########################### (assuming sorted over trials)
 
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
         df_all['trialwtgt_wpert_wb'] = -1
         df_all['trialwtgt_wpertstage_wb'] = -1
         df_all['trialwtgt_wpertstage_we'] = -1
@@ -423,7 +454,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
                 mask_pert = mask_pert0 & mask & (df_all['perturbation'] == pertv)
                 df_all.loc[mask_pert, 'trialwtgt_wpert'] = np.arange(sum(mask_pert) )
 
-                if dset == 'Romain_Exp2_Cohen':
+                if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
                     for bn in block_names:
                         mask_bn = mask_pert & (df_all['block_name'] == bn)
                         trials = df_all.loc[mask_bn, trial_col0]
@@ -433,7 +464,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
                         trials = df_all.loc[mask_env, trial_col0]
                         df_all.loc[mask_env, 'trialwtgt_wpert_we'] = np.arange(len(trials) )
 
-            if dset == 'Romain_Exp2_Cohen':
+            if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
                 for pert_stage in range(5):
                     for bn in block_names:
                         mask_ps = mask & (df_all['pert_stage_wb'] == float(pert_stage) ) &\
@@ -448,7 +479,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
 
 
 
-            if dset == 'Romain_Exp2_Cohen':
+            if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
                 for bn in block_names:
                     mask_bn = mask & (df_all['block_name'] == bn)
                     trials = df_all.loc[mask_bn, trial_col0]
@@ -462,7 +493,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
     # trial_group_cols_all = [s for s in df_all.columns if s.find('trial') >= 0]
     tmax = df_all[trial_col0].max()
     for tcn in trial_group_cols_all:
-        if dset == 'Romain_Exp2_Cohen':
+        if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
             assert df_all[tcn].max() <= tmax, tcn
             if ('wpert' in tcn) and (len(pertvals) > 10):
                 mx = df_all.query('environment == 0')[tcn].max()
@@ -476,7 +507,7 @@ def addBehavCols(df_all, inplace=True, skip_existing = False,
             if (tcnm >= tmax) or (tcnm <= 0):
                 print(f'problem with {tcn}: max of trial={tmax} max of {tcn}={tcnm}')
 
-    if dset == 'Romain_Exp2_Cohen':
+    if dset in ['Romain_Exp2_Cohen', 'Romain_Exp1_Cohen']:
         #pscAdj_NIH(df_all, ['error',  ] ) 
         #pscAdj_NIH(df_all, [ 'org_feedback', 'feedback' ], subpi = np.pi ) 
         #def f(x):    
@@ -634,6 +665,16 @@ def addBehavCols2(df):
     df.loc[ (df['ps2_'] == 'rnd') & (df['trialwb'] < 192. / 3.) ,'ps5_'] = 'subrnd_1'
     df.loc[ (df['ps2_'] == 'rnd') & (df['trialwb'] >= 192. / 3.) & (df['trialwb'] < 192. * 2. / 3.) ,'ps5_'] = 'subrnd_2'
     df.loc[ (df['ps2_'] == 'rnd') & (df['trialwb'] >= 192. * 2. / 3.) ,'ps5_'] = 'subrnd_3'
+
+    #if dset == 'Romain_Exp1_Cohen':
+    if 'session_id' in df.columns:
+        df['ps_exp1'] = 'unk'
+        c = df['pert_stage_wb'].isin([0])
+        df.loc[c,'ps_exp1'] = 'pre' 
+        c = df['pert_stage_wb'].isin([1,3,5,7])
+        df.loc[c,'ps_exp1'] = 'pert' 
+        c = df['pert_stage_wb'].isin([2,4,6,8])
+        df.loc[c,'ps_exp1'] = 'washout' 
 
     df['trialwpertstage_wb'] = df['trialwpertstage_wb'].where(df['env'] =="stable", 
                                         df['trialwb'])
@@ -898,7 +939,10 @@ def truncLargeStats(dfcs_fixhistlen_untrunc, histlens, std_mult,
 
 def _addErrorThr(df, stds):
     # estimate error at second halfs of init stage
-    df_wthr = df.merge(stds, on='subject')
+    if 'session_id' in df.columns:
+        df_wthr = df.merge(stds, on=['subject','session_id'])
+    else:
+        df_wthr = df.merge(stds, on='subject')
 
     df_wthr['error_initstd'] = df_wthr.error_deg_initstd /  180 * np.pi 
     #df_wthr
@@ -913,7 +957,11 @@ def _calcStds(df):
 
     #grp['error_deg'].std()
 
-    stds = df_init.groupby(['subject'],observed=True)['error_deg'].std()#.std()
+    if 'session_id' in df_init.columns:
+        print('Calculating stds per subject-session')
+        stds = df_init.groupby(['subject','session_id'],observed=True)['error_deg'].std()#.std()
+    else:
+        stds = df_init.groupby(['subject'],observed=True)['error_deg'].std()#.std()
     return stds
 
 def addErrorThr(df):
@@ -962,7 +1010,7 @@ def addNonHitCol(df):
 
 
 def getSubDf(df, subj, pertv, tgti, env, block_name=None, pert_seq_code=None,
-        dist_rad_from_prevtgt=None, dist_trial_from_prevtgt=None,
+        dist_rad_from_prevtgt=None, dist_trial_from_prevtgt=None, session_id = None,
         non_hit=False, verbose=0, nonenan=False ):
     '''
     if nonenan is True, then NaN in numeric columns are treated as None
@@ -972,6 +1020,7 @@ def getSubDf(df, subj, pertv, tgti, env, block_name=None, pert_seq_code=None,
     assert not isinstance(tgti,list)
     assert not isinstance(block_name,list)
     assert not isinstance(subj,list)
+    assert not isinstance(session_id,list)
     # and so on
 
     assert env in ['stable','random','all'], env
@@ -1004,8 +1053,6 @@ def getSubDf(df, subj, pertv, tgti, env, block_name=None, pert_seq_code=None,
         else:
             print('after target_ind len = ',len(df ))
 
-
-
     if (subj is not None):
         if isinstance(subj,list):
             df = df[df['subject'].isin(subj) ]
@@ -1014,6 +1061,16 @@ def getSubDf(df, subj, pertv, tgti, env, block_name=None, pert_seq_code=None,
     if len(df) == 0 and verbose:
         print('empty after subject')
         raise ValueError(f'Nothing for subject {subj}')
+
+
+    if (session_id is not None):
+        if isinstance(session_id,list):
+            df = df[df['session_id'].isin(session_id) ]
+        elif session_id != 'mean':
+            df = df[df['session_id'] == session_id]
+    if len(df) == 0 and verbose:
+        print('empty after session_id')
+        raise ValueError(f'Nothing for session_id {session_id}')
 
     # not env == 'all'
     if (env is not None) and ('environment' in df.columns):
@@ -1319,7 +1376,14 @@ def computeErrSensVersions(df_all, envs_cur,block_names_cur,
     #colns_set  = []; colns_skip = [];
     debug_break = 0
     dfs = []; #df_inds = []
-    for subj in subj_list: #[:1]:
+
+    if 'session_id' in df_all.columns and df_all.session_id.nunique() > 1:
+        sids = [1,2]
+        subjsess_list = itprod(subj_list, sids)
+    else:
+        subjsess_list = itprod(subj_list, [None])
+
+    for subj,session_id in subjsess_list: #[:1]:
         for tpl in p:
             #print(len(tpl), tpl)
             (env,block_name,pertv,gseqc,tgti,drptgt,dtptgt) = tpl
@@ -1328,13 +1392,17 @@ def computeErrSensVersions(df_all, envs_cur,block_names_cur,
             tpl = env,block_name,pertv,gseqc,tgti,\
                 drptgt,dtptgt,\
                 None,None
-            print(f'subj = {subj}, prod tuple contents = ', sprintf_tpl_statcalc(tpl) )
+
+            if session_id is None:
+                print(f'subj = {subj}, prod tuple contents = ', sprintf_tpl_statcalc(tpl) )
+            else:
+                print(f'subj = {subj}, session_id = {session_id} prod tuple contents = ', sprintf_tpl_statcalc(tpl) )
             #df = df_all
             # if we take only non-hit then, since we'll compute err sens sequentially
             # we'll get wrong
             #if trial_group_col in ['trialwb']:
             #    raise ValueError('not implemented')
-            df = getSubDf(df_all, subj, pertv,tgti,env,block_name,
+            df = getSubDf(df_all, subj, pertv,tgti,env,block_name, session_id=session_id,
                           non_hit = False, verbose=verbose)
             db_inds = df.index
             #df_inds += [db_inds]
@@ -1345,7 +1413,7 @@ def computeErrSensVersions(df_all, envs_cur,block_names_cur,
             #print('  ',tgn, coln,len(df))
             if (len(df) == 0) or (len(db_inds) == 0):
                 #rowi += 1
-                print('skip',tgn,subj)
+                print('skip',tgn,subj,session_id)
                 #colns_skip += [coln]
                 if DEBUG:
                     debug_break = 1
@@ -1931,8 +1999,12 @@ def comparePairs_(df_, varn, col, pooled=True ,
 def calcESthr(df, mult):
     assert not np.isinf(df['err_sens']).any()
     dfni = df                                           
-    dfni_d = dfni.groupby(['subject'],observed=True)\
-        ['err_sens'].describe().reset_index()
+    if 'session_id' in dfni.columns:
+        dfni_d = dfni.groupby(['subject','session_id'],observed=True)\
+            ['err_sens'].describe().reset_index()
+    else:
+        dfni_d = dfni.groupby(['subject'],observed=True)\
+            ['err_sens'].describe().reset_index()
     ES_thr = dfni_d[dfni_d.columns[1:]].mean().to_dict()['std'] * mult
     #ES_thr_single = ES_thr
     return ES_thr
@@ -1949,8 +2021,12 @@ def truncateNIHDfFromES(df_wthr, mult, ES_thr=None):
     dfni_g = dfni.query('err_sens.abs() <= @ES_thr')
     nremoved_pooled = len(dfni) - len(dfni_g)
 
-    sz = dfni.groupby(['subject'],observed=True).size()
-    sz_g = dfni_g.groupby(['subject'],observed=True).size()
+    if 'session_id' in dfni.columns:
+        sz = dfni.groupby(['subject','session_id'],observed=True).size()
+        sz_g = dfni_g.groupby(['subject','session_id'],observed=True).size()
+    else:
+        sz = dfni.groupby(['subject'],observed=True).size()
+        sz_g = dfni_g.groupby(['subject'],observed=True).size()
     mpct = ((sz - sz_g) / sz).mean() * 100
     print(f'Mean percentage of removed trials = {mpct:.3f}%, '
           f'pooled = {nremoved_pooled / len(dfni) * 100:.3f}%')
