@@ -667,7 +667,7 @@ def addBehavCols2(df):
     df.loc[ (df['ps2_'] == 'rnd') & (df['trialwb'] >= 192. * 2. / 3.) ,'ps5_'] = 'subrnd_3'
 
     #if dset == 'Romain_Exp1_Cohen':
-    if 'session_id' in df.columns:
+    if not (df['env'] == 'random').any():
         df['ps_exp1'] = 'unk'
         c = df['pert_stage_wb'].isin([0])
         df.loc[c,'ps_exp1'] = 'pre' 
@@ -675,6 +675,42 @@ def addBehavCols2(df):
         df.loc[c,'ps_exp1'] = 'pert' 
         c = df['pert_stage_wb'].isin([2,4,6,8])
         df.loc[c,'ps_exp1'] = 'washout' 
+
+        df['ps_exp1ext'] = df['ps_exp1'].copy()
+        ntr = 24 # num trials in pre
+        c = df['pert_stage_wb'].isin([2,4,6,8]) & (df['trialwpertstage_wb'] > ntr//2)
+        df.loc[c,'ps_exp1ext'] = 'washout2' 
+
+        df['ps3_'] = 'unk'
+        c = df['pert_stage_wb'].isin([0])
+        df.loc[c,'ps3_'] = 'pre' 
+        c = df['pert_stage_wb'].isin([1])
+        df.loc[c,'ps3_'] = 'pert_pro1' 
+        c = df['pert_stage_wb'].isin([2])
+        df.loc[c,'ps3_'] = 'washout_after_pro1' 
+        c = df['pert_stage_wb'].isin([3])
+        df.loc[c,'ps3_'] = 'pert_contra1' 
+        c = df['pert_stage_wb'].isin([4])
+        df.loc[c,'ps3_'] = 'washout_after_contra1' 
+
+        c = df['pert_stage_wb'].isin([5])
+        df.loc[c,'ps3_'] = 'pert_pro2' 
+        c = df['pert_stage_wb'].isin([6])
+        df.loc[c,'ps3_'] = 'washout_after_pro2' 
+        c = df['pert_stage_wb'].isin([7])
+        df.loc[c,'ps3_'] = 'pert_contra2' 
+        c = df['pert_stage_wb'].isin([8])
+        df.loc[c,'ps3_'] = 'washout_after_contra2' 
+    else:
+        df['ps2_ext'] = df['ps2_'].copy()
+
+        c = df['pert_stage_wb'].isin([2,4])
+        df.loc[c,'ps2_ext'] = 'washout' 
+        
+        ntr = 24 # num trials in pre
+        c = df['pert_stage_wb'].isin([2,4]) & (df['trialwpertstage_wb'] > ntr//2)
+        df.loc[c,'ps2_ext'] = 'washout2' 
+
 
     df['trialwpertstage_wb'] = df['trialwpertstage_wb'].where(df['env'] =="stable", 
                                         df['trialwb'])
@@ -867,7 +903,13 @@ def addWindowStatCols(dfc, ES_thr, varn0s = ['error_pscadj', 'error_pscadj_abs']
     # ttrs = ttrs.rename(columns={'p-val':'pval'})
 
 def getQueryPct(df,qs,verbose=True):
-    szprop = df.query(qs).groupby(['subject'],observed=True).size() / df.groupby(['subject'],observed=True).size()
+    if 'session_id' in df.columns:
+        cols = ['subject','session_id']
+    else:
+        cols = ['subject']
+    denom = df.groupby(cols,observed=True).size()
+    print(len(denom)) 
+    szprop = df.query(qs).groupby(cols,observed=True).size() / denom
     szprop *= 100
     me,std = szprop.mean(), szprop.std()
     if verbose:
@@ -1330,6 +1372,8 @@ def computeErrSensVersions(df_all, envs_cur,block_names_cur,
     '''
         if allow_duplicating is False we don't allow creating copies
         of subsets of indices within subject (this can be useful for decoding)
+
+        NOTE: this function takes row order as is it is i df_all, no resorting happens
     '''
     from bmp_config import block_names
 
@@ -1384,6 +1428,10 @@ def computeErrSensVersions(df_all, envs_cur,block_names_cur,
         subjsess_list = itprod(subj_list, [None])
 
     for subj,session_id in subjsess_list: #[:1]:
+        if subj == "sub13_DBUKMIRX" and session_id == 2:
+            # known to be bad
+            print('skipping known bad subj-session')
+            continue
         for tpl in p:
             #print(len(tpl), tpl)
             (env,block_name,pertv,gseqc,tgti,drptgt,dtptgt) = tpl
@@ -1755,7 +1803,8 @@ def myttest(df_, qs1, qs2, varn, alt = ['two-sided','greater','less'], paired=Fa
         assert not df2.duplicated(cols_checkdup).any()
     for alt_ in alt:
         #print('myttest subject ' ,list(zip(df2.subject.values, df1.subject.values)))
-        assert list(df1.subject.values) == list(df2.subject.values)
+        if paired:
+            assert list(df1.subject.values) == list(df2.subject.values), (df1.iloc[df1.subject.values !=  df2.subject.values]['subject'])
 
         ttr = ttest(df1[varn].values, 
                     df2[varn].values, alternative=alt_, paired=paired)
@@ -2117,6 +2166,8 @@ def corrMean(dfallst, coltocorr = 'trialwpertstage_wb',
     groupcols0 = []
     if 'thr' in dfallst.columns:
         groupcols0 = ['thr'] 
+    if 'session_id' in dfallst.columns:
+        groupcols0 += ['session_id'] 
     groupcols = groupcols0 + [stagecol] # to compute corrs with pooling
     groupcols2 = groupcols0 + ['subject', stagecol] # to compute corr within subj and then mean
 
@@ -2158,38 +2209,47 @@ def formatRecentStatVarnames(isec, histlen_str=' (histlen='):
         isec_nice.append(s2 )
     return isec_nice
 
-def checkSavingsNIH(dfall, method = 'spearman' ):
+def checkSavingsNIH(dfall, exp_name, method = 'spearman', coln_to_corr = 'err_sens' ):
     s1,s2 = set(['pert_stage','err_sens','trial_index','pert_stage']), set(dfall.columns) 
     assert s1 < s2, ( s1 - s2 )
     cols_ttrs = ['qs1','qs2','alternative','T','pval','mc_corr_N','dof','paired']
 
-    print('Correlation computation method = ',method)
+    print(f'Variable to compute savings with {coln_to_corr}. Correlation computation method = {method}')
     corrs_per_subj_me_,corrs_per_subj  = corrMean(dfall, 
-                stagecol = 'pert_stage', coln='err_sens' ,method=method)
+                stagecol = 'pert_stage', coln=coln_to_corr ,method=method)
 
     # show stat signif
-    stage_pairs = [(1,6),(3,8)]
+    if exp_name == 'NIH_stabstoch':
+        stage_pairs = [(1,6),(3,8)]
+        stage_pairs_nice = {"1-6":'first and last', "3-8":'second and third'}
+    elif exp_name == 'NIH_passive':
+        stage_pairs = [(1,5),(3,7)]
+        stage_pairs_nice = {"1-5":'up (first and third)', "3-7":'down (second and fourth)'}
+    else:
+        raise ValueError(f'Unknown exp_name {exp_name} for savings check')
+
+    qspairs = [(f'pert_stage == {stage_pairs[0][0]}', f'pert_stage == {stage_pairs[0][1]}'),
+                (f'pert_stage == {stage_pairs[1][0]}', f'pert_stage == {stage_pairs[1][1]}') ]
+
     ttrs2 = []
 
     lst1 = stage_pairs[0]    
     lst2 = stage_pairs[1]    
 
     df_ = corrs_per_subj.reset_index().query('pert_stage.isin(@lst1) or pert_stage.isin(@lst2)')
-    ttrs_sig, ttrs2 = comparePairs(df_, 'r', 'pert_stage', 
-        qspairs=[(f'pert_stage == {stage_pairs[0][0]}', f'pert_stage == {stage_pairs[0][1]}'),
-                  (f'pert_stage == {stage_pairs[1][0]}', f'pert_stage == {stage_pairs[1][1]}') ], 
-        paired=True)
+    ttrs_sig, ttrs2 = comparePairs(df_, 'r', 'pert_stage', qspairs= qspairs, paired=True)
 
-    print(f'Significant statistical difference between ES slopes (comparing pairs of stages {stage_pairs}):')
-    ttrs2_sig = ttrs2.query('pval <= 5e-2')
-    if len(ttrs2_sig):
-        display( ttrs2_sig[cols_ttrs] )
+    from pprint import pprint
+    print(f'\nIs there a significant statistical difference between ES slopes\n(comparing pairs of stages {stage_pairs})?')
+
+    ttrs2_sig_mainpairs = ttrs2.query('pval <= 5e-2')
+    if len(ttrs2_sig_mainpairs):
+        pprint( ttrs2_sig_mainpairs[cols_ttrs] )
     else:
         print('No significant differences found for savings pairs')
 
     ###########################
 
-    stage_pairs_nice = {"1-6":'first and last', "3-8":'second and third'}
     
     some = False
     for irow,row in ttrs2.query('alternative == "two-sided"').iterrows():
@@ -2212,15 +2272,35 @@ def checkSavingsNIH(dfall, method = 'spearman' ):
         print(f'\n\nNo savings (we have used {method}) !')
 
     ##################   let's check for other two pairs as well (not related to savings)
-    stage_pairs = [(1,3),(6,8)]
-    print(stage_pairs)
-    lst1 = stage_pairs[0]    
-    lst2 = stage_pairs[1]    
-    df_ = corrs_per_subj.reset_index().query('pert_stage.isin(@lst1) or pert_stage.isin(@lst2)')
+    if exp_name == 'NIH_stabstoch':
+        stage_pairs = [(1,3),(6,8)]
+    elif exp_name == 'NIH_passive':
+        stage_pairs = [(1,3),(3,5),(5,7)]
+
+    qspairs = []
+    for lst in stage_pairs:
+        qspairs += [(f'pert_stage == {lst[0]}', f'pert_stage == {lst[1]}')]
+    #qspairs = [(f'pert_stage == {stage_pairs[0][0]}', f'pert_stage == {stage_pairs[0][1]}'),
+    #            (f'pert_stage == {stage_pairs[1][0]}', f'pert_stage == {stage_pairs[1][1]}') ]
+
+    print(stage_pairs, qspairs)
+    #lst1 = stage_pairs[0]    
+    #lst2 = stage_pairs[1]    
+
+    corrs_per_subj.reset_index(inplace=True)
+    c = corrs_per_subj['pert_stage'].isin(stage_pairs[0])
+    for lst in stage_pairs:
+        c |= corrs_per_subj['pert_stage'].isin(lst)
+    #df_ = corrs_per_subj.reset_index().query('pert_stage.isin(@lst1) or pert_stage.isin(@lst2)')
+    df_ = corrs_per_subj.loc[c].reset_index()
     #ttrs2 = []
-    ttrs_sig, ttrs2 = comparePairs(df_, 'r', 'pert_stage', 
-        qspairs=[(f'pert_stage == {stage_pairs[0][0]}', f'pert_stage == {stage_pairs[0][1]}'),
-                  (f'pert_stage == {stage_pairs[1][0]}', f'pert_stage == {stage_pairs[1][1]}') ], 
+    ttrs_sig, ttrs2 = comparePairs(df_, 'r', 'pert_stage', qspairs=qspairs, 
         paired=True)
     print(f'Significant statistical difference between other ES slopes (comparing pairs of stages {stage_pairs}):')
-    display( ttrs2.query('pval <= 5e-2')[cols_ttrs] )#
+    ttrs2_sig_otherpairs = ttrs2.query('pval <= 5e-2')
+    if len(ttrs2_sig_otherpairs):
+        pprint( ttrs2_sig_otherpairs[cols_ttrs] )
+    else:
+        print('No significant differences found for other pairs')
+
+    return ttrs2_sig_mainpairs, ttrs2_sig_otherpairs

@@ -18,7 +18,7 @@ import pingouin as pg
 import argparse
 
 from bmp_base import get_lmm_pseudo_r_squared, run_linear_mixed_model 
-from bmp_config import path_data, envcode2env
+from bmp_config import path_data_stabrand as path_data
 from bmp_behav_proc import *
 
 all_suffixes = 'mav,std,invstd,mavsq,mav_d_std,mav_d_var,Tan,invmavsq,invmav,std_d_mav,invTan'.split(',')

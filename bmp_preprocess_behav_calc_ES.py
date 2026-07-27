@@ -20,6 +20,7 @@ scripts_dir = '.'
 parser = argparse.ArgumentParser()
 parser.add_argument('--n_jobs',  default = 20, type=int )
 parser.add_argument('--save_suffix',  default='_test', type=str )
+parser.add_argument('--read_suffix',  default=None, type=str )
 parser.add_argument('--use_sub_angles',  default=0, type=int )
 parser.add_argument('--n_subjects',  default=20, type=int )
 parser.add_argument('--coln_error',  default='error', type=str )
@@ -46,8 +47,14 @@ parser.add_argument('--reref_target_locs',  default=0, type=int )
 parser.add_argument('--session_id',  default=1, type=int, required=False )
 parser.add_argument('--data_subkind',  default='stabrand', type=str, required=True )
 parser.add_argument('--task',  default='visuomotor', type=str, required=False )
+
+parser.add_argument('--shuffle_seed',  default=None, type=int, required=False )
+parser.add_argument('--prep_for_interactive',  default=0, type=int, required=False )
  
 args = parser.parse_args()
+
+if args.read_suffix is None:
+    args.read_suffix = args.save_suffix
 
 if args.data_subkind == 'stabrand':
     from bmp_config import path_data_stabrand as data_dir_input
@@ -130,11 +137,15 @@ if args.do_collect:
             else:
                 behav_data_dir = pjoin(data_dir_input, subj, 
                                     f'session{session_id}', 'behavdata')
+
+            if args.data_subkind != 'stabrand' and not os.path.exists(behav_data_dir):
+                print(f'Skipping subject {subj} session {session_id} as no behavdata dir')
+                continue
             #behavdata
             task = 'VisuoMotor'
             updstr = '_upd'
             fname = pjoin(behav_data_dir,
-                        f'behav_{task}_df{updstr}{args.save_suffix}.pkl' )
+                        f'behav_{task}_df{updstr}{args.read_suffix}.pkl' )
             behav_df_full = pd.read_pickle(fname)
             mtime = datetime.datetime.fromtimestamp(os.path.getmtime(fname))
 
@@ -167,6 +178,7 @@ badcols =  checkErrBounds(df_all)
 
 if args.do_add_cols:
     if args.data_subkind == 'stabrand':
+        ##########################
         dset = 'Romain_Exp2_Cohen'
         addBehavCols(df_all, dset = dset)
     elif args.data_subkind == 'passive':
@@ -175,7 +187,8 @@ if args.do_add_cols:
         for session_id in sids:
             for subj in subjects[:args.n_subjects]:
                 df_ = df_all.query('subject == @subj and session_id == @session_id').copy()
-                assert len(df_)
+                if len(df_) == 0:
+                    continue
                 df_ = addBehavCols(df_, dset = dset)
                 dfs += [df_]
         df_all = pd.concat(dfs, ignore_index=True)
@@ -186,6 +199,23 @@ for varn in vars_to_pscadj:
     df_all[f'{varn}_pscadj'] = df_all[varn]
     df_all.loc[df_all['pert_seq_code'] == 1, f'{varn}_pscadj']= -df_all[varn]
 
+
+if args.shuffle_seed is not None:
+    np.random.seed(args.shuffle_seed)
+    perm = np.random.permutation(192*2)
+    #print('Permutation of trialwe:', perm[:10])  
+    # Apply the same permutation to every group
+    # Using group_keys=False keeps the original DataFrame structure
+    #['value'].transform(lambda x: x.values[perm])
+    #display(df_all[['trials','error']].head())
+    df_all['trials'] = df_all.groupby(['subject','env'], group_keys=False)['trials'].transform(lambda x: x.values[perm])
+    df_all['trial_index'] = df_all.groupby(['subject','env'], group_keys=False)['trial_index'].transform(lambda x: x.values[perm])
+    df_all = df_all.sort_values(['subject','trials']).reset_index(drop=True)
+    #display(df_all[['trials','error']].head())
+    print('Shuffled trials with seed', args.shuffle_seed)
+
+
+
 envs = ['stable','random','all']
 tgt_inds_all =  [None]
 if args.do_per_tgt:
@@ -194,6 +224,9 @@ if args.do_per_tgt:
 envs_cur = [ 'all']
 if args.do_per_env:
     envs_cur += ['stable', 'random']
+# if args.shuffle_seed is not None:
+#     envs_cur = ['random']
+
 block_names_cur = ['all']
 pertvals_cur = [None]
 gseqcs_cur = [ (0,1) ]
@@ -201,6 +234,7 @@ tgt_inds_cur = tgt_inds_all
 dists_rad_from_prevtgt_cur = [None]
 dists_trial_from_prevtgt_cur = [None]
 error_type = 'MPE'  # observed - goal, motor performance error
+
 
 if args.do_calc_ES:
     df_all_multi_tsz, ndf2vn = computeErrSensVersions(df_all, envs_cur,
@@ -239,18 +273,19 @@ if args.do_calc_ES:
 
 ##############################
 
-df_ = df_all_multi_tsz.query('trial_shift_size == 1 and trial_group_col_calc == "trials" and retention_factor_s == "1.000"')
-if 'session_id' in df_all:
-    if df_.session_id.nunique() == 2:
-        df_2sess = df_.copy()
-        df_ = df_2sess.query('session_id == 1')
-assert not df_.duplicated(['subject','trials']).any()
+if args.do_plot or args.prep_for_interactive:
+    df_ = df_all_multi_tsz.query('trial_shift_size == 1 and trial_group_col_calc == "trials" and retention_factor_s == "1.000"')
+    if 'session_id' in df_all:
+        if df_.session_id.nunique() == 2:
+            df_2sess = df_.copy()
+            df_ = df_2sess.query('session_id == 1')
+    assert not df_.duplicated(['subject','trials']).any()
 
 
-##############################
-df_ = truncateDf(df_, q=0,infnan_handling='discard',coln='err_sens' )
-me = df_.groupby(['subject','environment'], observed=True).\
-    mean(numeric_only=1).reset_index()
+    ##############################
+    df_ = truncateDf(df_, q=0,infnan_handling='discard',coln='err_sens' )
+    me = df_.groupby(['subject','environment'], observed=True).\
+        mean(numeric_only=1).reset_index()
 
 if args.do_plot and len(df_) > 0:
 

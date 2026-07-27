@@ -183,7 +183,8 @@ def relplot_multi(sep_ys_by = 'hue', szinfo_loc = 'legend', **kwargs):
 def make_fig3_v2(df_, palette, hue_order, col_order, ps_2nice, 
        hues, pswb2r, pswb2pr, corrs_sig, pcorrs_sig, coord_let, coord_let_shift, show_plots=0,
        hue = None, show_reg=True, show_reg_rnd=True, pval_display_format='float', show_ttest_alt_type = True,
-                fontsize_r = 12 , fontsize_panel_let = 19,  fsz_lab = 16, fontsize_title = 20):
+                fontsize_r = 12 , fontsize_panel_let = 19,  fsz_lab = 16, fontsize_title = 20,
+                stage_col = 'ps2_'):
     #hue = 'pert_stage_wb'
     from bmp_config import path_fig
     from bmp_behav_proc import pval2starcode
@@ -203,7 +204,7 @@ def make_fig3_v2(df_, palette, hue_order, col_order, ps_2nice,
         print(f'{len(df_)=} {varn_x=} {varn_y=}')
 
         fg = sns.relplot(data=df_, kind='line',
-            x=varn_x, col='ps2_', y=varn_y, hue=hue,
+            x=varn_x, col=stage_col, y=varn_y, hue=hue,
             errorbar = 'sd', palette = palette,
             facet_kws={'sharex':False},
             hue_order=hue_order, col_order = col_order, legend=None)
@@ -212,7 +213,12 @@ def make_fig3_v2(df_, palette, hue_order, col_order, ps_2nice,
             
         for i, ax in enumerate(fg.axes.flat):
             col_ = fg.col_names[i]
-            ax.set_title(ps_2nice[ax.get_title()[7:]], fontsize = fontsize_title )
+            if stage_col == 'ps2_':
+                n = 7
+            else:
+                n = 13
+
+            ax.set_title(ps_2nice[ax.get_title()[n:]], fontsize = fontsize_title )
             show_reg_cur = show_reg 
             if col_ == 'rnd':
                 show_reg_cur &= show_reg_rnd
@@ -225,7 +231,7 @@ def make_fig3_v2(df_, palette, hue_order, col_order, ps_2nice,
                         sp = list(sp) + list(sp)
                     else:
                         sp = [palette[i] ]
-                sns.lineplot(data=df_[df_['ps2_'] == col_], 
+                sns.lineplot(data=df_[df_[stage_col] == col_], 
                     x=varn_x, y=varn_y2, 
                     hue=hue, ax=ax, legend=None,
                     palette = sp, dashes=[4,2])

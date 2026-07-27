@@ -26,3 +26,7 @@ env2color = dict(zip(env_order,palette_stabrand))
 subenv_order = ['pre','pert','washout','rnd']
 palette_subenv = ['goldenrod','tab:blue','crimson','tab:grey']
 subenv2color = dict(zip(subenv_order,palette_subenv) )
+
+subenv_ext_order = ['pre','pert','washout','washout2']
+palette_ext_subenv = ['goldenrod','tab:blue','crimson','tab:grey']
+subenv_ext2color = dict(zip(subenv_ext_order,palette_ext_subenv) )

@@ -31,6 +31,9 @@ env2subtr   = dict(stable=20, random=25)
 ps_2nice = dict( zip(['pre','pert','washout','rnd'], 
         ['No perturbation','Perturbation','Washout','Random']) )
 
+ps_2nice_ext = dict( zip(['pre','pert','washout','washout2','rnd'], 
+        ['No perturbation','Perturbation','Early washout','Late washout','Random']) )
+
 phase2trigger = {
     'REST_PHASE': 10,
     'REST_PHASE_RANDOM': 15,
